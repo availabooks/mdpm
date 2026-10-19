@@ -1,6 +1,6 @@
 ---
 title: Build Support Website for This
-status: todo
+status: backlog
 author: Elijah Allen
 created: 2026-10-19
 owner: claude
@@ -35,3 +35,5 @@ This just has to be a static website, it can be built in this project directory.
 
 - 2026-10-19 14:21 claude — claimed (run r-20261019-142132-hbg3)
 - 2026-10-19 14:21 Elijah Allen — started an interactive claude session on this task
+- 2026-10-19 14:29 Elijah Allen — started an interactive claude session on this task
+- 2026-10-19 14:29 claude — claimed for refinement (run r-20261019-142919-ivy5)

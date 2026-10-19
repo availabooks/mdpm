@@ -1,6 +1,6 @@
 ---
 title: "Continue with Agent: talk to the agent in its context"
-status: review
+status: done
 owner: claude
 author: Elijah Allen
 created: 2026-10-19
@@ -12,6 +12,7 @@ depends_on:
   - agent-runner
 start: 2026-10-19
 branch: agent/continue-with-agent
+end: 2026-10-19
 ---
 
 # Continue with Agent: talk to the agent in its context
