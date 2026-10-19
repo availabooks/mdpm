@@ -81,6 +81,9 @@
     wire();
   }
 
+  /** Keys being dragged: the whole selection when a selected card is dragged, else just that card. */
+  let dragKeys = [];
+
   function wire() {
     for (const b of app.querySelectorAll('.card .act')) {
       b.addEventListener('click', (e) => {
@@ -89,13 +92,16 @@
       });
     }
     for (const el of app.querySelectorAll('.card')) {
-      el.addEventListener('click', () => mdpm.post({ type: 'open', file: el.dataset.key }));
+      el.addEventListener('click', (e) => mdpm.clickTask(e, el.dataset.key));
       el.addEventListener('dragstart', (e) => {
+        dragKeys = mdpm.selected.has(el.dataset.key) ? [...mdpm.selected] : [el.dataset.key];
         e.dataTransfer.setData('text/plain', el.dataset.key);
         e.dataTransfer.effectAllowed = 'move';
-        el.classList.add('dragging');
+        for (const c of app.querySelectorAll('.card')) if (dragKeys.includes(c.dataset.key)) c.classList.add('dragging');
       });
-      el.addEventListener('dragend', () => el.classList.remove('dragging'));
+      el.addEventListener('dragend', () => {
+        for (const c of app.querySelectorAll('.card.dragging')) c.classList.remove('dragging');
+      });
     }
     for (const col of app.querySelectorAll('.column')) {
       col.addEventListener('dragover', (e) => {
@@ -108,17 +114,22 @@
       col.addEventListener('drop', (e) => {
         e.preventDefault();
         col.classList.remove('over');
-        const task = mdpm.model.tasks.find((t) => t.key === e.dataTransfer.getData('text/plain'));
+        const key = e.dataTransfer.getData('text/plain');
+        const keys = dragKeys.includes(key) ? dragKeys : [key];
+        dragKeys = [];
         const status = col.dataset.status;
-        if (!task || task.status === status) return;
-        task.status = status; // optimistic; the file watcher confirms
+        const tasks = mdpm.model.tasks.filter((t) => keys.includes(t.key) && t.status !== status);
+        if (!tasks.length) return;
+        for (const t of tasks) t.status = status; // optimistic; the file watcher confirms
         render();
-        mdpm.post({ type: 'setStatus', file: task.key, status });
+        if (tasks.length === 1) mdpm.post({ type: 'setStatus', file: tasks[0].key, status });
+        else mdpm.post({ type: 'setStatusMany', files: tasks.map((t) => t.key), status });
       });
     }
     for (const b of app.querySelectorAll('.col-add')) {
       b.addEventListener('click', () => mdpm.post({ type: 'newTask', project: mdpm.state.project || undefined, status: b.dataset.status }));
     }
+    mdpm.paintSelection();
   }
 
   mdpm.render = render;

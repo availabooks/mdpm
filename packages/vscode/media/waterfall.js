@@ -205,7 +205,7 @@
 
   function wire() {
     for (const el of app.querySelectorAll('.wf-label[data-key]')) {
-      el.addEventListener('click', () => mdpm.post({ type: 'open', file: el.dataset.key }));
+      el.addEventListener('click', (e) => mdpm.clickTask(e, el.dataset.key));
     }
     for (const track of app.querySelectorAll('.wf-track.unscheduled')) {
       track.addEventListener('click', (e) => {
@@ -217,6 +217,7 @@
       });
     }
     for (const bar of app.querySelectorAll('.bar')) bar.addEventListener('pointerdown', startDrag);
+    mdpm.paintSelection();
   }
 
   function startDrag(e) {
@@ -226,7 +227,15 @@
     const task = mdpm.model.tasks.find((t) => t.key === bar.dataset.key);
     const [s, en] = span(task);
     const mode = e.target.classList.contains('h-start') ? 'start' : e.target.classList.contains('h-end') ? 'end' : 'move';
-    drag = { bar, task, mode, x0: e.clientX, s, e: en, ns: s, ne: en, moved: false };
+    // Moving a selected bar shifts every other selected scheduled task along with it.
+    const group =
+      mode === 'move' && mdpm.selected.has(task.key)
+        ? mdpm
+            .selectedTasks()
+            .filter((t) => t !== task && span(t))
+            .map((t) => ({ task: t, sp: span(t), bar: app.querySelector(`.bar[data-key="${CSS.escape(t.key)}"]`) }))
+        : [];
+    drag = { bar, task, mode, group, x0: e.clientX, s, e: en, ns: s, ne: en, moved: false };
     bar.setPointerCapture(e.pointerId);
     bar.addEventListener('pointermove', onDrag);
     bar.addEventListener('pointerup', endDrag, { once: true });
@@ -243,18 +252,29 @@
     d.bar.style.width = `${(d.ne - d.ns + 1) * geom.px}px`;
     d.bar.dataset.tip = `${fmt(d.ns)} → ${fmt(d.ne)}`;
     d.bar.classList.add('dragging');
+    for (const g of d.group) if (g.bar) g.bar.style.left = `${(g.sp[0] + d.ns - d.s - geom.min) * geom.px}px`;
   }
 
-  function endDrag() {
+  function endDrag(e) {
     const d = drag;
     drag = null;
     d.bar.removeEventListener('pointermove', onDrag);
-    if (!d.moved) return mdpm.post({ type: 'open', file: d.task.key });
+    if (!d.moved) return mdpm.clickTask(e, d.task.key);
+    mdpm.ignoreClick(); // the click that ends a drag is not a click on empty space
     if (d.ns === d.s && d.ne === d.e) return render();
     d.task.start = fmt(d.ns);
     d.task.end = fmt(d.ne);
+    const shift = d.ns - d.s;
+    for (const g of d.group) {
+      g.task.start = fmt(g.sp[0] + shift);
+      g.task.end = fmt(g.sp[1] + shift);
+    }
     render();
-    mdpm.post({ type: 'setDates', file: d.task.key, start: d.task.start, end: d.task.end });
+    if (!d.group.length) return mdpm.post({ type: 'setDates', file: d.task.key, start: d.task.start, end: d.task.end });
+    mdpm.post({
+      type: 'setDatesMany',
+      changes: [d.task, ...d.group.map((g) => g.task)].map((t) => ({ file: t.key, start: t.start, end: t.end })),
+    });
   }
 
   mdpm.render = render;

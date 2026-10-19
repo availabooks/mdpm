@@ -104,7 +104,7 @@ describe('workspace', () => {
   it('shares a task between projects via symlink without duplicating it', async () => {
     const ws0 = await loadWorkspace(root);
     const link = await linkTask(findTask(ws0, 'login')!.file, path.join(root, 'api'));
-    expect(link.kind).toBe(process.platform === 'win32' ? expect.any(String) : 'symlink');
+    expect(link.kind).toEqual(process.platform === 'win32' ? expect.any(String) : 'symlink');
 
     const ws = await loadWorkspace(root);
     const login = findTask(ws, 'login')!;

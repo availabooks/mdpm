@@ -12,6 +12,7 @@ import {
   loadWorkspace,
   previewTaskChange,
   toPosix,
+  updateTask,
   writeBack,
 } from '@mdpm/core';
 import { existsSync } from 'fs';
@@ -171,6 +172,88 @@ export class Model implements vscode.Disposable {
     const warnings = issues.filter((i) => i.level === 'warning');
     if (warnings.length) vscode.window.showWarningMessage(`mdpm: saved "${task.title}", with warnings: ${describe(warnings)}`);
     return true;
+  }
+
+  /**
+   * Bulk version of `update()`: validates every change first and asks once about all the
+   * invalid ones ("Save Anyway" / "Skip Invalid"), writes, then reloads once.
+   * Returns the tasks that were written.
+   */
+  async updateMany(requested: { task: Task; changes: Record<string, unknown> }[]): Promise<Task[]> {
+    if (requested.length === 1) return (await this.update(requested[0].task, requested[0].changes)) ? [requested[0].task] : [];
+    const items = requested.map(({ task, changes }) => {
+      const full = applyStatusDefaults(task, changes);
+      const ws = this.workspaces.find((w) => w.tasks.includes(task));
+      const issues = ws ? previewTaskChange(ws, task, full) : [];
+      return { task, requested: changes, changes: full, issues };
+    });
+    const invalid = items.filter((i) => i.issues.some((x) => x.level === 'error'));
+    let toWrite = items;
+    if (invalid.length) {
+      const valid = items.length - invalid.length;
+      const detail =
+        invalid.map((i) => `"${i.task.title}":\n${describe(i.issues.filter((x) => x.level === 'error'))}`).join('\n\n') +
+        `\n\nSave Anyway writes all ${items.length} tasks and you can fix the front matter afterwards.` +
+        (valid ? ` Skip Invalid saves only the other ${valid}.` : '');
+      const choice = await vscode.window.showErrorMessage(
+        `mdpm: this change would make ${invalid.length} of the ${items.length} selected tasks invalid, so nothing was saved yet.`,
+        { modal: true, detail },
+        ...(valid ? ['Save Anyway', 'Skip Invalid'] : ['Save Anyway']),
+      );
+      if (choice === 'Skip Invalid') toWrite = items.filter((i) => !invalid.includes(i));
+      else if (choice !== 'Save Anyway') {
+        this.changed.fire(); // let views drop their optimistic update
+        return [];
+      }
+    }
+
+    const failed: { item: (typeof items)[number]; error: string }[] = [];
+    for (const item of toWrite) {
+      try {
+        await updateTask(item.task.file, item.changes);
+      } catch (e) {
+        failed.push({ item, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    await this.reload(); // once, and it also reverts views to what is on disk for failed writes
+
+    const saved = toWrite.filter((i) => !failed.some((f) => f.item === i));
+    const warned = saved.filter((i) => i.issues.some((x) => x.level === 'warning'));
+    if (warned.length) {
+      vscode.window.showWarningMessage(
+        `mdpm: saved ${saved.length} tasks, with warnings: ` +
+          warned.map((i) => `"${i.task.title}": ${describe(i.issues.filter((x) => x.level === 'warning'))}`).join(' '),
+      );
+    }
+    if (failed.length) void this.offerRetry(failed.map((f) => ({ task: f.item.task, changes: f.item.requested, error: f.error })));
+    return saved.map((i) => i.task);
+  }
+
+  private async offerRetry(failed: { task: Task; changes: Record<string, unknown>; error: string }[]) {
+    const choice = await vscode.window.showErrorMessage(
+      `mdpm: ${failed.length} task${failed.length > 1 ? 's were' : ' was'} not saved: ` +
+        failed.map((f) => `"${f.task.title}" (${f.error})`).join('; ') +
+        '. The views show what is on disk. Fix the problem (for example, make the files writable), then click Retry to save just these tasks again.',
+      'Retry',
+    );
+    if (choice !== 'Retry') return;
+    const retry = failed.map((f) => ({ task: this.task(f.task.file), changes: f.changes }));
+    const gone = failed.filter((_, i) => !retry[i].task);
+    if (gone.length) {
+      vscode.window.showErrorMessage(
+        `mdpm: ${gone.map((f) => `"${f.task.title}"`).join(', ')} could not be found any more (moved or deleted?), so ${gone.length > 1 ? 'they were' : 'it was'} not retried. ` +
+          'Run "mdpm: Refresh", select the tasks again and repeat the change.',
+      );
+    }
+    const present = retry.filter((r): r is { task: Task; changes: Record<string, unknown> } => !!r.task);
+    try {
+      if (present.length) await this.updateMany(present);
+    } catch (e) {
+      // only the single-task path throws; updateMany reports its own write failures
+      vscode.window.showErrorMessage(
+        `mdpm: "${present[0].task.title}" was still not saved: ${e instanceof Error ? e.message : e} Fix the problem, then make the change again.`,
+      );
+    }
   }
 
   workspaceOf(task: Task): Workspace | undefined {
