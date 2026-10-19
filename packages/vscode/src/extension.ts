@@ -1,12 +1,31 @@
-import { Project, Task, createProject, createTask, defaultAuthor, isFinalStatus, linkTask, newTaskMeta, nextTaskPath, previewNewTask, slugify, today, unlinkTask } from '@mdpm/core';
+import {
+  BLOCKED_STATUS,
+  Project,
+  QUESTIONS_HEADING,
+  TaskTemplate,
+  Task,
+  createProject,
+  createTask,
+  defaultAuthor,
+  isFinalStatus,
+  linkTask,
+  modeFor,
+  newTaskMeta,
+  nextTaskPath,
+  previewNewTask,
+  slugify,
+  taskBody,
+  today,
+  unlinkTask,
+} from '@mdpm/core';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Model } from './model';
 import { ViewPanel } from './panel';
 import { Node, ProjectTree } from './tree';
 
-/** Arguments a command may receive: a tree node, a webview request, or nothing (palette). */
-type CommandArg = Node | { projectKey?: string; status?: string } | undefined;
+/** Arguments a command may receive: a tree node, a webview request, a file (editor title), or nothing (palette). */
+type CommandArg = Node | { projectKey?: string; status?: string } | { taskFile: string } | vscode.Uri | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
   const model = new Model();
@@ -14,6 +33,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(model, vscode.window.registerTreeDataProvider('mdpm.projects', tree));
 
   const projectOf = (arg: CommandArg): Project | undefined => {
+    if (arg instanceof vscode.Uri) return undefined;
     if (arg && 'kind' in arg) return arg.kind === 'project' ? arg.project : arg.location.project;
     if (arg && 'projectKey' in arg && arg.projectKey) return model.project(arg.projectKey);
     return undefined;
@@ -21,6 +41,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
   /** The task a command targets: tree node, else the task open in the active editor. */
   const taskOf = (arg: CommandArg): Task | undefined => {
+    if (arg instanceof vscode.Uri) return model.task(arg.fsPath);
+    if (arg && 'taskFile' in arg) return model.task(arg.taskFile);
     if (arg && 'kind' in arg && arg.kind === 'task') return arg.task;
     const doc = vscode.window.activeTextEditor?.document;
     return doc ? model.task(doc.uri.fsPath) : undefined;
@@ -43,6 +65,44 @@ export async function activate(context: vscode.ExtensionContext) {
     }
     return task;
   };
+
+  /** Runs `mdpm agent run --task <id>` with the bundled CLI in a terminal, so the run is visible and can be stopped. */
+  const sendToAgent = async (task: Task, agent: string) => {
+    const ws = model.workspaceOf(task);
+    if (!ws) return;
+    if (!modeFor(task)) {
+      const hint = task.status === BLOCKED_STATUS ? ' Answer its questions and use "Unblock" first.' : ' Move it back to todo first if it needs more work.';
+      vscode.window.showWarningMessage(`mdpm: "${task.title}" is ${task.status}; agents only work on backlog, todo and in-progress tasks.${hint}`);
+      return;
+    }
+    const cli = vscode.Uri.joinPath(context.extensionUri, 'dist', 'mdpm.js').fsPath;
+    const terminal = vscode.window.createTerminal({
+      name: `mdpm · ${agent} · ${task.id}`,
+      // VS Code's own runtime acts as node, so nothing has to be installed or on PATH; no shell is involved.
+      shellPath: process.execPath,
+      shellArgs: [cli, '--root', ws.root, 'agent', 'run', '--task', task.id, '--agent', agent],
+      cwd: ws.root,
+      env: { ELECTRON_RUN_AS_NODE: '1', MDPM_AGENT: null },
+      iconPath: new vscode.ThemeIcon('hubot'),
+    });
+    terminal.show();
+  };
+
+  const pickAgent = async (placeHolder: string): Promise<string | undefined> => {
+    const agents = model.agents();
+    const def = model.defaultAgent();
+    const items = agents.map((a) => ({ label: `$(hubot) ${a}`, description: a === def ? 'default (mdpm.agent.default)' : undefined, agent: a }));
+    return (await vscode.window.showQuickPick(items, { placeHolder }))?.agent;
+  };
+
+  /** Keeps the editor title buttons in step with the task in the active editor. */
+  const updateContext = () => {
+    const doc = vscode.window.activeTextEditor?.document;
+    const task = doc ? model.task(doc.uri.fsPath) : undefined;
+    vscode.commands.executeCommand('setContext', 'mdpm.activeTask', !!task);
+    vscode.commands.executeCommand('setContext', 'mdpm.activeTaskBlocked', !!task && model.isBlocked(task));
+  };
+  context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(updateContext), model.onDidChange(updateContext));
 
   const run = (fn: (arg: CommandArg) => Promise<unknown>) => async (arg: CommandArg) => {
     try {
@@ -77,7 +137,8 @@ export async function activate(context: vscode.ExtensionContext) {
       const status = arg && 'status' in arg && arg.status ? arg.status : project.statuses[0];
       const owner = vscode.workspace.getConfiguration('mdpm').get<string>('defaultOwner') || undefined;
       const end = isFinalStatus(project, status) ? today() : undefined;
-      const task = { title: title.trim(), status, owner, author: defaultAuthor(project.dir), end };
+      const template = vscode.workspace.getConfiguration('mdpm').get<TaskTemplate>('taskTemplate') === 'default' ? 'default' : 'agent';
+      const task = { title: title.trim(), status, owner, author: defaultAuthor(project.dir), end, body: taskBody(title.trim(), template) };
       const ws = model.workspaces.find((w) => w.projects.includes(project));
       const errors = ws
         ? previewNewTask(ws, project, nextTaskPath(project.dir, task.title, project.taskExtension), newTaskMeta(task)).filter((i) => i.level === 'error')
@@ -184,6 +245,46 @@ export async function activate(context: vscode.ExtensionContext) {
       await model.reload();
     },
 
+    'mdpm.sendToAgent': async (arg) => {
+      const task = requireTask(arg);
+      if (task) await sendToAgent(task, model.defaultAgent());
+    },
+
+    'mdpm.sendToAgentAs': async (arg) => {
+      const task = requireTask(arg);
+      if (!task) return;
+      const agent = await pickAgent(`Send "${task.title}" to…`);
+      if (agent) await sendToAgent(task, agent);
+    },
+
+    'mdpm.queueForAgent': async (arg) => {
+      const task = requireTask(arg);
+      if (!task) return;
+      const agent = await pickAgent(`Queue "${task.title}" for… (the next "mdpm agent run" picks it up)`);
+      if (!agent || agent === task.owner) return;
+      await model.update(task, { owner: agent }, { text: `queued for ${agent}`, by: defaultAuthor(task.home.dir) });
+    },
+
+    'mdpm.unblock': async (arg) => {
+      const task = requireTask(arg);
+      if (!task) return;
+      if (!model.isBlocked(task)) {
+        vscode.window.showInformationMessage(`mdpm: "${task.title}" is ${task.status}, not blocked, so there is nothing to unblock.`);
+        return;
+      }
+      const doc = await vscode.workspace.openTextDocument(task.file);
+      const line = doc.getText().split(/\r?\n/).findIndex((l) => new RegExp(`^##\\s+${QUESTIONS_HEADING}\\s*$`, 'i').test(l));
+      const at = new vscode.Position(Math.max(0, line), 0);
+      await vscode.window.showTextDocument(doc, { selection: new vscode.Range(at, at), preview: false });
+      const target = task.home.statuses.includes('todo') ? 'todo' : task.home.statuses[0];
+      const saved = await model.update(task, { status: target }, { text: `unblocked; moved back to ${target}`, by: defaultAuthor(task.home.dir) });
+      if (saved) {
+        vscode.window.showInformationMessage(
+          `mdpm: "${task.title}" is back in ${target}. Answer the questions inline (tick them or write below them); ${task.owner ?? 'the agent'} reads them on its next run.`,
+        );
+      }
+    },
+
     'mdpm.openProjectFile': async (arg) => {
       const p = projectOf(arg);
       if (p) await vscode.window.showTextDocument(vscode.Uri.file(p.file));
@@ -199,6 +300,7 @@ export async function activate(context: vscode.ExtensionContext) {
   for (const [id, fn] of Object.entries(commands)) context.subscriptions.push(vscode.commands.registerCommand(id, run(fn)));
 
   await model.reload();
+  updateContext();
 }
 
 export function deactivate() {}

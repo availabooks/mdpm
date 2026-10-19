@@ -162,7 +162,7 @@ describe('classic Kanban board webview', () => {
   it('still renders one column per status, sorted by priority', () => {
     const { app, send } = boot('board.js');
     send(model([card('low', 'planned', { priority: 'low' }), card('high', 'planned', { priority: 'high' })]));
-    const columns = [...app.innerHTML.matchAll(/class="column" data-status="([^"]*)"/g)].map((m) => m[1]);
+    const columns = [...app.innerHTML.matchAll(/class="column(?: blocked)?" data-status="([^"]*)"/g)].map((m) => m[1]);
     expect(columns).toEqual(STATUSES);
     expect(app.innerHTML.indexOf('/p/high.md')).toBeLessThan(app.innerHTML.indexOf('/p/low.md'));
   });

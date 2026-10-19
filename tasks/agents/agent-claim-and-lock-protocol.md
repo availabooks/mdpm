@@ -8,6 +8,8 @@ tags:
 depends_on:
   - agent-task-commands
 priority: 3
+start: 2026-10-27
+end: 2026-10-27
 ---
 
 # Agent claim and lock protocol

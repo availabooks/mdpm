@@ -3,6 +3,10 @@ import * as path from 'path';
 import { buildTask, str, stringList, toPosix } from './build';
 import { parseFrontMatter, parseYamlMapping } from './frontmatter';
 import {
+  AGENT_MODES,
+  AgentMode,
+  AgentSettings,
+  DEFAULT_AGENT_SETTINGS,
   DEFAULT_STATUSES,
   LinkKind,
   PROJECT_FILE,
@@ -206,11 +210,26 @@ async function loadProject(dir: string, parent: Project | undefined, ws: Workspa
       byStatus && typeof byStatus === 'object' && !Array.isArray(byStatus)
         ? Object.fromEntries(Object.entries(byStatus).map(([k, v]) => [k, stringList(v)]))
         : parent?.requiredByStatus ?? {},
+    agent: agentSettings(meta.agent, parent?.agent ?? DEFAULT_AGENT_SETTINGS),
     lines,
   };
   parent?.children.push(project);
   ws.projects.push(project);
   return project;
+}
+
+/** Merges a `.proj` `agent:` block over the inherited settings, key by key. Invalid values are ignored (and reported by validateProject). */
+function agentSettings(raw: unknown, inherited: AgentSettings): AgentSettings {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return inherited;
+  const r = raw as Record<string, unknown>;
+  const out: AgentSettings = { ...inherited };
+  if (typeof r.enabled === 'boolean') out.enabled = r.enabled;
+  if (typeof r.unassigned === 'boolean') out.unassigned = r.unassigned;
+  if (Array.isArray(r.modes) && r.modes.every((m) => (AGENT_MODES as string[]).includes(m))) out.modes = r.modes as AgentMode[];
+  if (Number.isInteger(r.maxTurns) && (r.maxTurns as number) > 0) out.maxTurns = r.maxTurns as number;
+  if (Array.isArray(r.allowedTools) && r.allowedTools.every((t) => typeof t === 'string')) out.allowedTools = r.allowedTools as string[];
+  if (typeof r.maxBudgetUsd === 'number' && r.maxBudgetUsd > 0) out.maxBudgetUsd = r.maxBudgetUsd;
+  return out;
 }
 
 /** All projects in the subtree rooted at `project`, including itself. */

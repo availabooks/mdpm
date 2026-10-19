@@ -1,4 +1,4 @@
-import { Project, Task } from './types';
+import { BLOCKED_STATUS, Project, Task } from './types';
 
 /**
  * Stages of the AI flow board: how work moves when an agent does the building.
@@ -25,9 +25,6 @@ export const FLOW_STAGE_INFO: Record<FlowStage, FlowStageInfo> = {
   review: { stage: 'review', label: 'Review', actor: 'you', hint: 'Check the work and accept it', statuses: ['review', 'in-review'] },
   done: { stage: 'done', label: 'Done', actor: 'you', hint: 'The idea is now product', statuses: ['done'] },
 };
-
-/** Status that means "waiting for a person to answer questions". */
-export const BLOCKED_STATUS = 'blocked';
 
 export interface CriteriaProgress {
   done: number;

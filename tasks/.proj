@@ -5,10 +5,24 @@ statuses:
   - backlog
   - todo
   - in-progress
+  - blocked
   - review
   - done
 # Agents and humans must leave tasks in a valid state; `mdpm check --strict` enforces this in CI.
 requiredByStatus:
   in-progress: [owner, start]
+  blocked: [owner]
   review: [owner]
   done: [end]
+# Agents may run the checks CI runs.
+agent:
+  allowedTools:
+    - Bash(mdpm *)
+    - Bash(git status*)
+    - Bash(git diff*)
+    - Bash(git log*)
+    - Bash(git add *)
+    - Bash(git commit *)
+    - Bash(npm test)
+    - Bash(npm run typecheck)
+    - Bash(npm run build)

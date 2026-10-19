@@ -11,7 +11,8 @@ type Message =
   | { type: 'setStatus'; file: string; status: string }
   | { type: 'setStage'; file: string; stage: FlowStage }
   | { type: 'setDates'; file: string; start?: string; end?: string }
-  | { type: 'newTask'; project?: string; status?: string };
+  | { type: 'newTask'; project?: string; status?: string }
+  | { type: 'agent'; action: 'send' | 'sendAs' | 'unblock'; file: string };
 
 const TITLES: Record<PanelKind, string> = { board: 'Kanban', flow: 'AI Flow', waterfall: 'Waterfall' };
 
@@ -89,6 +90,11 @@ export class ViewPanel {
         case 'newTask':
           await vscode.commands.executeCommand('mdpm.newTask', { projectKey: m.project, status: m.status });
           break;
+        case 'agent': {
+          const command = { send: 'mdpm.sendToAgent', sendAs: 'mdpm.sendToAgentAs', unblock: 'mdpm.unblock' }[m.action];
+          await vscode.commands.executeCommand(command, { taskFile: this.task(m.file).file });
+          break;
+        }
       }
     } catch (e) {
       vscode.window.showErrorMessage(

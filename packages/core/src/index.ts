@@ -5,3 +5,7 @@ export * from './ops';
 export * from './validate';
 export * from './flow';
 export { buildTask } from './build';
+export * from './body';
+export * from './agent';
+export * from './instructions';
+export * from './runner';

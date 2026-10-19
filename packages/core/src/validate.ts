@@ -1,6 +1,8 @@
 import * as path from 'path';
+import { PLACEHOLDERS, agentNames, parseAgentDefinition } from './agent';
+import { QUESTIONS_HEADING, openQuestions, readiness } from './body';
 import { buildTask, toPosix } from './build';
-import { Issue, PROJECT_FIELDS, Project, TASK_FIELDS, TASK_FIELD_ALIASES, Task, TaskMeta, Workspace } from './types';
+import { AGENT_MODES, BLOCKED_STATUS, Issue, PROJECT_FIELDS, Project, TASK_FIELDS, TASK_FIELD_ALIASES, Task, TaskMeta, Workspace } from './types';
 
 /*
  * Validation rules. Every issue has a stable `code` so scripts and agents can react to
@@ -75,6 +77,12 @@ export function validateProject(ws: Workspace, p: Project): Issue[] {
     }
   }
 
+  if (has('agent')) checkAgentSettings(meta.agent, add);
+  if (has('agents')) {
+    if (p.parent) add('warning', 'proj/agents-not-root', 'agents', `"agents" is only read from the root .proj, so it is ignored here. Move it to ${rel(ws, rootOf(p).file)}.`);
+    else checkAgentDefinitions(meta.agents, add);
+  }
+
   for (const k of Object.keys(meta)) {
     const hint = typoOf(k, PROJECT_FIELDS);
     if (hint) {
@@ -86,16 +94,79 @@ export function validateProject(ws: Workspace, p: Project): Issue[] {
   return issues;
 }
 
+type Add = (level: Issue['level'], code: string, field: string | undefined, message: string) => void;
+
+const AGENT_KEYS = ['enabled', 'unassigned', 'modes', 'maxTurns', 'allowedTools', 'maxBudgetUsd'];
+
+function checkAgentSettings(a: unknown, add: Add) {
+  if (!isPlainObject(a)) {
+    add('error', 'proj/field-type', 'agent', '"agent" must be a block of settings, e.g.\n  agent:\n    enabled: true\n    unassigned: false');
+    return;
+  }
+  for (const k of ['enabled', 'unassigned']) {
+    if (a[k] !== undefined && typeof a[k] !== 'boolean') add('error', 'proj/field-type', 'agent', `"agent.${k}" must be true or false.`);
+  }
+  if (a.modes !== undefined) {
+    if (!isStringList(a.modes)) add('error', 'proj/field-type', 'agent', `"agent.modes" must be a list, e.g. modes: [${AGENT_MODES.join(', ')}]`);
+    else {
+      const bad = a.modes.filter((m) => !(AGENT_MODES as string[]).includes(m));
+      if (bad.length) add('error', 'proj/field-value', 'agent', `"agent.modes" lists ${quoteList(bad)}. The modes are ${AGENT_MODES.join(', ')}.`);
+    }
+  }
+  if (a.maxTurns !== undefined && !(Number.isInteger(a.maxTurns) && (a.maxTurns as number) > 0)) add('error', 'proj/field-value', 'agent', '"agent.maxTurns" must be a whole number above 0, e.g. maxTurns: 50');
+  if (a.maxBudgetUsd !== undefined && !(typeof a.maxBudgetUsd === 'number' && a.maxBudgetUsd > 0)) add('error', 'proj/field-value', 'agent', '"agent.maxBudgetUsd" must be a number above 0, e.g. maxBudgetUsd: 5');
+  if (a.allowedTools !== undefined && !isStringList(a.allowedTools)) {
+    add('error', 'proj/field-type', 'agent', '"agent.allowedTools" must be a list of tool rules, e.g. allowedTools: ["Bash(mdpm *)", "Bash(npm test)"]');
+  }
+  for (const k of Object.keys(a)) {
+    if (AGENT_KEYS.includes(k)) continue;
+    const hint = typoOf(k, AGENT_KEYS) ?? AGENT_KEYS.find((n) => n.toLowerCase() === k.toLowerCase());
+    add('warning', 'proj/unknown-field', 'agent', `Unknown setting "agent.${k}".${hint ? ` Did you mean "${hint}"?` : ` The agent settings are ${AGENT_KEYS.join(', ')}.`} It is ignored.`);
+  }
+}
+
+function checkAgentDefinitions(a: unknown, add: Add) {
+  if (!isPlainObject(a)) {
+    add('error', 'proj/field-type', 'agents', '"agents" must map agent names to commands, e.g.\n  agents:\n    default: claude\n    my-agent:\n      command: [my-agent, --prompt, "{prompt}"]');
+    return;
+  }
+  const names = new Set(Object.keys(a).filter((k) => k !== 'default'));
+  for (const [name, v] of Object.entries(a)) {
+    if (name === 'default') {
+      if (typeof v !== 'string') add('error', 'proj/field-type', 'agents', '"agents.default" must be the name of an agent, e.g. default: claude');
+      else if (!names.has(v) && !parseAgentDefinition(v, {})) {
+        add('error', 'proj/agent-unknown', 'agents', `"agents.default" is "${v}", which is not defined. Use claude, codex or cursor, or define "${v}" under "agents".`);
+      }
+      continue;
+    }
+    const def = parseAgentDefinition(name, v);
+    if (!def) {
+      add('error', 'proj/field-type', 'agents', `Agent "${name}" needs a command: a list of the program and its arguments, e.g.\n  ${name}:\n    command: [${name}, "{prompt}"]`);
+      continue;
+    }
+    const used = [...def.command, ...(def.resume ?? [])].flatMap((arg) => [...arg.matchAll(/\{(\w+)\}/g)].map((m) => m[1]));
+    const unknown = [...new Set(used.filter((u) => !PLACEHOLDERS.includes(u)))];
+    if (unknown.length) {
+      add('warning', 'proj/field-value', 'agents', `Agent "${name}" uses unknown placeholder${unknown.length > 1 ? 's' : ''} ${unknown.map((u) => `{${u}}`).join(', ')}; they are passed through as written. Known placeholders: ${PLACEHOLDERS.map((x) => `{${x}}`).join(', ')}.`);
+    }
+    if (!def.stdin && !used.includes('prompt') && !used.includes('promptFile')) {
+      add('warning', 'proj/field-value', 'agents', `Agent "${name}" never receives the prompt. Add "{prompt}" or "{promptFile}" to its command, or set "stdin: true".`);
+    }
+  }
+}
+
 /** Checks tasks individually and against each other (ids, dependencies). */
 export function validateTasks(ws: Workspace, tasks: Task[]): Issue[] {
   const issues: Issue[] = [];
   const byId = new Map<string, Task[]>();
   for (const t of tasks) byId.set(t.id, [...(byId.get(t.id) ?? []), t]);
+  const agents = agentNames(ws);
 
   for (const t of tasks) {
     const add = (level: Issue['level'], code: string, field: string | undefined, message: string) =>
       issues.push({ level, code, file: t.file, field, line: field ? t.lines[field] : undefined, message });
     checkTask(ws, t, add);
+    checkAgentTask(t, agents, add);
 
     const same = byId.get(t.id)!;
     if (same.length > 1) {
@@ -150,11 +221,34 @@ export function validateTasks(ws: Workspace, tasks: Task[]): Issue[] {
   return issues;
 }
 
-function checkTask(ws: Workspace, t: Task, add: (level: Issue['level'], code: string, field: string | undefined, message: string) => void) {
+/** Rules for the agent workflow: blocked tasks carry questions; tasks queued for an agent are ready. */
+function checkAgentTask(t: Task, agents: Set<string>, add: Add) {
+  if (t.status === BLOCKED_STATUS && !openQuestions(t.body).length) {
+    add(
+      'warning',
+      'task/blocked-without-question',
+      'status',
+      `The task is blocked but has no open question. Add what it is waiting for under "## ${QUESTIONS_HEADING}" as "- [ ] …", or move it back to another status.`,
+    );
+  }
+  if (t.status === 'todo' && t.owner && agents.has(t.owner)) {
+    const r = readiness(t.body);
+    if (!r.ready) {
+      add(
+        'warning',
+        'task/not-ready',
+        'owner',
+        `This task is queued for ${t.owner} but isn't ready, so the agent will only refine it. Add ${r.missing} (the "agent" template has every section: mdpm new --template agent).`,
+      );
+    }
+  }
+}
+
+function checkTask(ws: Workspace, t: Task, add: Add) {
   const m = t.meta;
   const has = (k: string) => m[k] !== undefined && m[k] !== null;
 
-  for (const k of ['id', 'title', 'status', 'owner', 'author', 'priority']) {
+  for (const k of ['id', 'title', 'status', 'owner', 'author', 'priority', 'branch', 'pr']) {
     if (has(k) && !isScalar(m[k])) add('error', 'task/field-type', k, `"${k}" must be a single value, e.g. ${k}: ${example(k)}`);
   }
   for (const k of ['tags', 'depends_on', ...TASK_FIELD_ALIASES]) {
@@ -217,16 +311,16 @@ function checkTask(ws: Workspace, t: Task, add: (level: Issue['level'], code: st
 }
 
 /**
- * Issues that applying `changes` to `task` would introduce. Problems the task already had are
+ * Issues that applying `changes` (and, optionally, a new `body`) to `task` would introduce. Problems the task already had are
  * not repeated, so an unrelated old mistake never blocks a status change.
  */
-export function previewTaskChange(ws: Workspace, task: Task, changes: Record<string, unknown>): Issue[] {
+export function previewTaskChange(ws: Workspace, task: Task, changes: Record<string, unknown>, body = task.body): Issue[] {
   const meta: TaskMeta = { ...task.meta };
   for (const [k, v] of Object.entries(changes)) {
     if (v === undefined || v === null || v === '') delete meta[k];
     else meta[k] = v;
   }
-  const candidate = buildTask(task.file, meta, task.body, task.locations, task.lines);
+  const candidate = buildTask(task.file, meta, body, task.locations, task.lines);
   const key = (i: Issue) => `${i.code}|${i.field}|${i.message}`;
   const before = new Set(validateTasks(ws, ws.tasks).filter((i) => i.file === task.file).map(key));
   const after = validateTasks(ws, ws.tasks.map((t) => (t === task ? candidate : t))).filter((i) => i.file === task.file);
@@ -257,7 +351,7 @@ function typoOf(key: string, known: string[]): string | undefined {
   return known.find((n) => n.toLowerCase() === k) ?? known.find((n) => distance(n.toLowerCase(), k) <= limit);
 }
 
-function checkFieldNames(fields: string[], where: string, add: (level: Issue['level'], code: string, field: string | undefined, message: string) => void) {
+function checkFieldNames(fields: string[], where: string, add: Add) {
   for (const f of fields) {
     const hint = typoOf(f, TASK_FIELDS);
     if (hint) add('warning', 'proj/unknown-field', where.split('.')[0], `"${where}" lists "${f}". Did you mean "${hint}"? As written, tasks must have a "${f}" field.`);
@@ -289,6 +383,10 @@ function findCycles(tasks: Task[], byId: Map<string, Task[]>): Task[][] {
   };
   tasks.forEach((t) => state.has(t) || visit(t));
   return cycles;
+}
+
+function rootOf(p: Project): Project {
+  return p.parent ? rootOf(p.parent) : p;
 }
 
 /** The project whose .proj actually defines an inherited rule. */

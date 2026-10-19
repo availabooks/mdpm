@@ -42,7 +42,8 @@ describe('flow stages', () => {
   });
 
   it('maps the default statuses onto the flow', () => {
-    const stages = DEFAULT_STATUSES.map((s) => flowStage(task(s), DEFAULT_STATUSES));
+    // `blocked` is not a stage of its own; the next test covers where it sits.
+    const stages = DEFAULT_STATUSES.filter((s) => s !== 'blocked').map((s) => flowStage(task(s), DEFAULT_STATUSES));
     expect(stages).toEqual(['idea', 'planned', 'building', 'review', 'done']);
   });
 
