@@ -18,12 +18,13 @@
     const homeName = mdpm.project(t.home)?.name;
     const meta = [
       `<span class="id">${esc(t.id)}</span>`,
+      mdpm.runBadge(t),
       progress(t),
       t.branch && t.stage === 'review' ? `<span class="branch" title="Branch to review">⎇ ${esc(t.branch)}</span>` : '',
       t.owner ? `<span class="owner" title="${esc(t.owner)}">${esc(t.owner)}</span>` : '',
     ].join('');
     return `
-      <div class="card${blocked(t) ? ' blocked' : ''}" draggable="true" data-key="${esc(t.key)}" title="${esc(t.relPath)} · ${esc(t.status)}">
+      <div class="card${blocked(t) ? ' blocked' : ''}${t.running ? ' working' : ''}" draggable="true" data-key="${esc(t.key)}" title="${esc(t.relPath)} · ${esc(t.status)}">
         ${blocked(t) ? `<div class="flag">Needs your answer</div>` : ''}
         <div class="card-title">${esc(t.title)}</div>
         <div class="card-meta">${meta}</div>

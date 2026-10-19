@@ -8,6 +8,7 @@
     const homeName = mdpm.project(t.home)?.name;
     const meta = [
       `<span class="id">${esc(t.id)}</span>`,
+      mdpm.runBadge(t),
       t.priority !== undefined ? `<span class="badge prio">${esc(String(t.priority).match(/^\d/) ? `P${t.priority}` : t.priority)}</span>` : '',
       t.end ? `<span class="${overdue ? 'due overdue' : 'due'}" title="${esc(`${t.start ?? '?'} → ${t.end}`)}">⏱ ${esc(t.end)}</span>` : '',
       t.shared ? `<span class="shared" title="Shared with ${t.projects.length} projects">🔗${t.projects.length}</span>` : '',
@@ -17,17 +18,19 @@
     ].join('');
     const agent = mdpm.model.defaultAgent;
     // Talk to the agent that worked on the task: its conversation reopens in the task's worktree.
-    const chat = t.agentOwned && t.status !== 'backlog'
+    const chat = t.agentOwned && t.status !== 'backlog' && !t.running
       ? `<button class="act more" data-action="continue" title="Continue with ${esc(t.owner)}: reopen its conversation to give more directions">💬</button>`
       : '';
     const actions =
-      (t.status === BLOCKED
+      t.running
+        ? ''
+        : (t.status === BLOCKED
         ? `<button class="act" data-action="unblock" title="Unblock: open the questions and move back to todo">Unblock</button>`
         : mdpm.canSendToAgent(t)
           ? `<button class="act" data-action="send" title="Send to ${esc(agent)} (runs it now in a terminal)">▶ ${esc(agent)}</button><button class="act more" data-action="sendAs" title="Send to another agent…">▾</button>`
           : '') + chat;
     return `
-      <div class="card${t.status === BLOCKED ? ' blocked' : ''}" draggable="true" data-key="${esc(t.key)}" title="${esc(t.relPath)}" style="--accent:${mdpm.statusColor(t)}">
+      <div class="card${t.status === BLOCKED ? ' blocked' : ''}${t.running ? ' working' : ''}" draggable="true" data-key="${esc(t.key)}" title="${esc(t.relPath)}" style="--accent:${mdpm.statusColor(t)}">
         ${actions ? `<div class="card-actions">${actions}</div>` : ''}
         <div class="card-title">${esc(t.title)}</div>
         <div class="card-meta">${meta}</div>

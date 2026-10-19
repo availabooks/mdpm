@@ -15,6 +15,8 @@ import {
   previewNewTask,
   slugify,
   taskBody,
+  activityVerb,
+  ago,
   today,
   unlinkTask,
 } from '@mdpm/core';
@@ -71,6 +73,11 @@ export async function activate(context: vscode.ExtensionContext) {
   const sendToAgent = async (task: Task, agent: string) => {
     const ws = model.workspaceOf(task);
     if (!ws) return;
+    const busy = model.runningOn(task);
+    if (busy) {
+      vscode.window.showWarningMessage(`mdpm: ${busy.agent} is already ${activityVerb(busy.mode)} "${task.title}" (started ${ago(busy.started)} ago). Wait for it to finish, or stop its terminal first.`);
+      return;
+    }
     if (!modeFor(task)) {
       const hint = task.status === BLOCKED_STATUS ? ' Answer its questions and use "Unblock" first.' : ' Move it back to todo first if it needs more work.';
       vscode.window.showWarningMessage(`mdpm: "${task.title}" is ${task.status}; agents only work on backlog, todo and in-progress tasks.${hint}`);
@@ -97,6 +104,11 @@ export async function activate(context: vscode.ExtensionContext) {
   const continueWithAgent = async (task: Task) => {
     const ws = model.workspaceOf(task);
     if (!ws) return;
+    const busy = model.runningOn(task);
+    if (busy) {
+      vscode.window.showWarningMessage(`mdpm: ${busy.agent} is ${activityVerb(busy.mode)} "${task.title}" right now (started ${ago(busy.started)} ago). Open another conversation once it finishes, or stop its terminal first.`);
+      return;
+    }
     const cli = vscode.Uri.joinPath(context.extensionUri, 'dist', 'mdpm.js').fsPath;
     const terminal = vscode.window.createTerminal({
       name: `mdpm · chat · ${task.id}`,
@@ -115,6 +127,19 @@ export async function activate(context: vscode.ExtensionContext) {
     const items = agents.map((a) => ({ label: `$(hubot) ${a}`, description: a === def ? 'default (mdpm.agent.default)' : undefined, agent: a }));
     return (await vscode.window.showQuickPick(items, { placeHolder }))?.agent;
   };
+
+  // Status bar: how many agents are working, and a way to see them.
+  const working = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
+  working.command = 'mdpm.openBoard';
+  context.subscriptions.push(working);
+  const updateWorking = () => {
+    const runs = model.active;
+    if (!runs.length) return working.hide();
+    working.text = `$(sync~spin) ${runs.length === 1 ? `${runs[0].agent} ${activityVerb(runs[0].mode)}` : `${runs.length} agents working`}`;
+    working.tooltip = new vscode.MarkdownString(runs.map((r) => `**${r.task}**: ${r.agent} ${activityVerb(r.mode)} · ${ago(r.started)}`).join('\n\n'));
+    working.show();
+  };
+  context.subscriptions.push(model.onDidChange(updateWorking));
 
   /** Keeps the editor title buttons in step with the task in the active editor. */
   const updateContext = () => {
@@ -328,6 +353,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   await model.reload();
   updateContext();
+  updateWorking();
 }
 
 export function deactivate() {}

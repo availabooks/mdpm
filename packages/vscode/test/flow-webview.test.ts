@@ -172,3 +172,36 @@ describe('classic Kanban board webview', () => {
     expect(app.innerHTML.indexOf('/p/high.md')).toBeLessThan(app.innerHTML.indexOf('/p/low.md'));
   });
 });
+
+describe('agent activity on cards', () => {
+  const working = { agent: 'claude', mode: 'implement', started: new Date(Date.now() - 3 * 60000).toISOString() };
+
+  it('shows who is working on a running task, and a quiet "queued" for waiting agent tasks', () => {
+    for (const [view, stage] of [['flow.js', 'building'], ['board.js', 'in-progress']] as const) {
+      const { app, send } = boot(view);
+      send(
+        model([
+          card('run', stage, { owner: 'claude', agentOwned: true, running: working }),
+          card('wait', 'planned', { owner: 'claude', agentOwned: true }),
+          card('mine', 'planned', { owner: 'eli' }),
+        ]),
+      );
+      const html = app.innerHTML;
+      const cardOf = (id: string) => html.split(/(?=<div class="card[ "])/).find((c) => c.includes(`data-key="/p/${id}.md"`)) ?? '';
+      expect(cardOf('run')).toContain('claude implementing');
+      expect(cardOf('run')).toMatch(/class="age" data-since="[^"]+">3m</);
+      expect(cardOf('run')).toContain(' working');
+      expect(cardOf('wait')).toContain('class="queued"');
+      expect(cardOf('wait')).not.toContain('class="running"');
+      expect(cardOf('mine')).not.toMatch(/running|queued/);
+    }
+  });
+
+  it('hides the send and continue buttons while the agent is working on the task', () => {
+    const { app, send } = boot('board.js');
+    send(model([card('run', 'in-progress', { owner: 'claude', agentOwned: true, running: working }), card('idle', 'planned', { owner: 'claude', agentOwned: true })]));
+    const cardOf = (id: string) => app.innerHTML.split(/(?=<div class="card[ "])/).find((c) => c.includes(`data-key="/p/${id}.md"`)) ?? '';
+    expect(cardOf('run')).not.toContain('data-action=');
+    expect(cardOf('idle')).toContain('data-action="send"');
+  });
+});

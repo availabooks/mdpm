@@ -9,3 +9,4 @@ export * from './body';
 export * from './agent';
 export * from './instructions';
 export * from './runner';
+export * from './activity';

@@ -1,4 +1,4 @@
-import { BLOCKED_STATUS, Project, Task, TaskLocation } from '@mdpm/core';
+import { BLOCKED_STATUS, Project, Task, TaskLocation, activityVerb, ago } from '@mdpm/core';
 import * as vscode from 'vscode';
 import { Model } from './model';
 
@@ -44,14 +44,17 @@ export class ProjectTree implements vscode.TreeDataProvider<Node> {
     const item = new vscode.TreeItem(task.title, vscode.TreeItemCollapsibleState.None);
     item.id = location.path;
     // e.g. "taskLink:blocked"; menus match the start with /^task/ and the state with /:blocked/.
-    item.contextValue = `${location.link ? 'taskLink' : 'task'}:${task.status === BLOCKED_STATUS ? 'blocked' : isFinal(task) ? 'done' : 'open'}`;
-    item.iconPath = statusIcon(task);
+    const running = this.model.runningOn(task);
+    const state = running ? 'running' : task.status === BLOCKED_STATUS ? 'blocked' : isFinal(task) ? 'done' : 'open';
+    item.contextValue = `${location.link ? 'taskLink' : 'task'}:${state}`;
+    item.iconPath = running ? new vscode.ThemeIcon('sync~spin', new vscode.ThemeColor('charts.purple')) : statusIcon(task);
     const owner = task.owner && `${this.model.isAgent(task) ? '🤖 ' : '@'}${task.owner}`;
-    item.description = [task.status, owner, location.link && '↪ linked'].filter(Boolean).join(' · ');
+    item.description = [task.status, running ? `${running.agent} ${activityVerb(running.mode)}…` : owner, location.link && '↪ linked'].filter(Boolean).join(' · ');
     item.resourceUri = vscode.Uri.file(task.file);
     item.tooltip = new vscode.MarkdownString(
       [
         `**${task.title}** \`${task.id}\``,
+        running ? `**${running.agent} is ${activityVerb(running.mode)}** (started ${ago(running.started)} ago)` : '',
         `status: ${task.status}${task.owner ? ` · owner: ${task.owner}` : ''}`,
         task.start || task.end ? `${task.start ?? '?'} → ${task.end ?? '?'}` : '',
         task.locations.length > 1 ? `in: ${task.locations.map((l) => l.project.name).join(', ')}` : '',

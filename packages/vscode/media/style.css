@@ -301,3 +301,29 @@ button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 .wf-overlay .dep.bad { stroke: var(--vscode-errorForeground); }
 .wf-overlay .arrowhead { fill: var(--muted); }
 .wf-overlay .arrowhead.bad { fill: var(--vscode-errorForeground); }
+
+/* An agent is working on this task right now */
+.running {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border-radius: 10px;
+  color: var(--vscode-foreground);
+  background: color-mix(in srgb, var(--vscode-charts-purple) 28%, transparent);
+  border: 1px solid var(--vscode-charts-purple);
+}
+.running .pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--vscode-charts-purple);
+  animation: mdpm-pulse 1.4s ease-in-out infinite;
+}
+.card.working { border-color: var(--vscode-charts-purple); animation: mdpm-glow 2.4s ease-in-out infinite; }
+.queued { padding: 0 6px; border: 1px dashed var(--border); border-radius: 10px; color: var(--muted); }
+@keyframes mdpm-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.7); } }
+@keyframes mdpm-glow { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-charts-purple) 45%, transparent); } }
+@media (prefers-reduced-motion: reduce) {
+  .running .pulse, .card.working { animation: none; }
+}
