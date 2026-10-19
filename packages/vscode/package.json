@@ -165,6 +165,12 @@
         "title": "Unblock",
         "category": "mdpm",
         "icon": "$(debug-continue)"
+      },
+      {
+        "command": "mdpm.continueWithAgent",
+        "title": "Continue with Agent",
+        "category": "mdpm",
+        "icon": "$(comment-discussion)"
       }
     ],
     "menus": {
@@ -290,6 +296,11 @@
           "command": "mdpm.unblock",
           "when": "viewItem =~ /^task.*:blocked$/",
           "group": "0_agent@1"
+        },
+        {
+          "command": "mdpm.continueWithAgent",
+          "when": "viewItem =~ /^task/",
+          "group": "0_agent@4"
         }
       ],
       "commandPalette": [
@@ -320,6 +331,11 @@
           "command": "mdpm.unblock",
           "when": "mdpm.activeTaskBlocked",
           "group": "navigation@90"
+        },
+        {
+          "command": "mdpm.continueWithAgent",
+          "when": "mdpm.activeTask",
+          "group": "navigation@91"
         }
       ]
     },

@@ -89,6 +89,26 @@ export async function activate(context: vscode.ExtensionContext) {
     terminal.show();
   };
 
+  /**
+   * Opens a terminal talking to the agent that worked on the task: `mdpm agent continue` reopens its
+   * conversation in the task's worktree (recreating the worktree after a handoff), so you can give it
+   * more directions. Runs the bundled CLI, interactively, so permission prompts come to you.
+   */
+  const continueWithAgent = async (task: Task) => {
+    const ws = model.workspaceOf(task);
+    if (!ws) return;
+    const cli = vscode.Uri.joinPath(context.extensionUri, 'dist', 'mdpm.js').fsPath;
+    const terminal = vscode.window.createTerminal({
+      name: `mdpm · chat · ${task.id}`,
+      shellPath: process.execPath,
+      shellArgs: [cli, '--root', ws.root, 'agent', 'continue', task.id],
+      cwd: ws.root,
+      env: { ELECTRON_RUN_AS_NODE: '1', MDPM_AGENT: null },
+      iconPath: new vscode.ThemeIcon('comment-discussion'),
+    });
+    terminal.show();
+  };
+
   const pickAgent = async (placeHolder: string): Promise<string | undefined> => {
     const agents = model.agents();
     const def = model.defaultAgent();
@@ -257,6 +277,11 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!task) return;
       const agent = await pickAgent(`Send "${task.title}" to…`);
       if (agent) await sendToAgent(task, agent);
+    },
+
+    'mdpm.continueWithAgent': async (arg) => {
+      const task = requireTask(arg);
+      if (task) await continueWithAgent(task);
     },
 
     'mdpm.queueForAgent': async (arg) => {

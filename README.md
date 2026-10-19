@@ -206,6 +206,7 @@ mdpm agent run                       # run the next task for the default agent
 mdpm agent run --task export-csv --agent codex
 mdpm agent run --max-tasks 5         # work through the queue
 mdpm agent run --dry-run             # show the task, command and prompt; change nothing
+mdpm agent continue export-csv       # talk to the agent that worked on it, in its context
 ```
 
 **What an agent works on.** `mdpm next --agent claude [--all] [--json]` returns the best task
@@ -259,6 +260,17 @@ the loop: the task stays resumable and later runs wait until the reset time. Eac
 recorded in `.mdpm/runs/` (agent, task, duration, exit code, session id, cost), which is
 git-ignored. Agents are started without a shell, so it works the same on Windows, macOS and
 Linux; `mdpm` is put on the agent's `PATH` for the run.
+
+**Giving an agent more directions.** `mdpm agent continue <task>` (or **Continue with Agent**
+in VS Code) opens an interactive session with the agent that worked on the task. For Claude it
+reopens the latest conversation in the task's worktree (`claude --continue`), so it has the
+whole context: what it read, what it tried, what it asked. If a handoff removed the worktree,
+it is recreated on the task's `agent/<id>` branch first. With no earlier conversation, or with
+`--fresh`, a new one starts with the task, its log and its questions as the opening message.
+You answer permission prompts yourself, and `MDPM_AGENT` isn't set, so the agent-only
+restrictions don't apply; the agent can still `mdpm log` and `mdpm handoff` as usual. Each
+use adds a line to the task's Agent log. Custom agents opt in with `interactive` (and
+optionally `continueInteractive`) commands, e.g. `interactive: [my-agent, chat, "{prompt}"]`.
 
 **Configuration.** In any `.proj` (inherited key by key):
 
@@ -325,6 +337,8 @@ a separate development window.
 - **Waterfall**: Gantt timeline from `start`/`end`, grouped by project, with dependency
   arrows (red when a task starts before its dependency ends). Drag a bar to move it, drag
   its edges to change start/end, click an unscheduled row to schedule it. Day/week/month zoom.
+- **Continue with Agent** (💬 on agent-owned cards, the task's context menu, or the editor
+  title) opens a terminal `mdpm · chat · <id>` with that conversation, to give more directions.
 - **Agents**: *Send to Agent* (hover a card, the task's context menu, or the editor title)
   runs `mdpm agent run --task <id>` in a terminal named `mdpm · claude · <id>`, using the CLI
   bundled with the extension. *Send to Agent…* picks another agent; *Queue for Agent…* only

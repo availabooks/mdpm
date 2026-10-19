@@ -54,10 +54,15 @@ function boot(view = 'flow.js') {
   const ids = new Map<string, FakeEl>();
   const posted: any[] = [];
   let onMessage: Listener = () => {};
-  const document = { getElementById: (id: string) => ids.get(id) ?? ids.set(id, el()).get(id)! };
+  const document = {
+    getElementById: (id: string) => ids.get(id) ?? ids.set(id, el()).get(id)!,
+    // Used by the multi-select painting in common.js; the fake page has no selectable elements.
+    querySelectorAll: (): FakeEl[] => [],
+  };
   const context = vm.createContext({
     document,
-    window: { addEventListener: (_: string, fn: Listener) => (onMessage = fn) },
+    // common.js also listens for keys and clicks; only the extension's messages matter here.
+    window: { addEventListener: (ev: string, fn: Listener) => void (ev === 'message' && (onMessage = fn)) },
     acquireVsCodeApi: () => ({ getState: () => undefined, setState: () => {}, postMessage: (m: unknown) => posted.push(m) }),
   });
   const media = path.join(__dirname, '..', 'media');

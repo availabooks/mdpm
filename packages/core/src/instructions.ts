@@ -116,6 +116,21 @@ export function upsertMarked(existing: string, content: string): string {
   return `${existing}${sep}${block}\n`;
 }
 
+/** Opening message of an interactive session a person starts on a task (`mdpm agent continue`). */
+export function buildContinuePrompt(p: Pick<PromptInput, 'agent' | 'taskId' | 'taskFile' | 'taskText' | 'root' | 'worktree' | 'branch'>): string {
+  return `You are ${p.agent}. A person is here with you now, working on an mdpm task. Read the task below, including its "Agent log", questions and any earlier work on branch "${p.branch}", then tell them in two or three sentences where things stand and ask what they want next. Don't start new work until they say so.
+
+- Task id: ${p.taskId}
+- Task file (task state lives here; edit its body, change front matter only with mdpm commands): ${p.taskFile}
+- Your working directory is a git worktree on branch "${p.branch}". Make and commit code changes there.
+- MDPM_ROOT is set to ${p.root}, so mdpm commands use the main checkout. Log what you do with mdpm log ${p.taskId} "<text>", and hand off with mdpm handoff ${p.taskId} "<summary>" --branch ${p.branch} when the person says the work is done. Don't mark the task done; the person does that.
+
+\`\`\`\`markdown
+${p.taskText.trim()}
+\`\`\`\`
+`;
+}
+
 const SKILL_FRONT = `---
 name: mdpm
 description: Find, claim and work on mdpm tasks (markdown files with front matter in folders with a .proj file), and write progress, questions and handoffs back to them with the mdpm CLI. Use when asked to work on tasks, the backlog or "your queue", when MDPM_TASK is set, or before editing a task file's front matter.

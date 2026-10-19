@@ -32,12 +32,14 @@ import {
   openQuestions,
   planBlock,
   planClaim,
+  planContinue,
   planHandoff,
   planRelease,
   previewNewTask,
   previewTaskChange,
   projectSubtree,
   runAgents,
+  runInteractive,
   runId,
   suggest,
   taskBody,
@@ -707,6 +709,32 @@ agent
       if (e instanceof RunnerError) fail(e.message);
       throw e;
     }
+  });
+
+agent
+  .command('continue <task>')
+  .description('talk to the agent that worked on a task: reopens its conversation (or starts one from the task) in the task\'s worktree')
+  .option(agentOption, 'agent to talk to (default: the agent of the last run on the task)')
+  .option('--fresh', 'start a new conversation instead of reopening the last one')
+  .option('--dry-run', 'print what would run; change nothing')
+  .action(async (ref: string, o: { agent?: string; fresh?: boolean; dryRun?: boolean }) => {
+    if (envAgent) fail(`MDPM_AGENT is set ("${envAgent}"), so this looks like an agent starting a session. "mdpm agent continue" is for people; unset MDPM_AGENT if you are one.`);
+    const ws = await load();
+    let plan;
+    try {
+      plan = await planContinue({ root: ws.root, task: ref, agent: o.agent, fresh: o.fresh, dryRun: o.dryRun, cli: { node: process.execPath, script: path.resolve(process.argv[1]) } });
+    } catch (e) {
+      if (e instanceof RunnerError) fail(e.message);
+      throw e;
+    }
+    const what = plan.reopened ? `reopening ${plan.agent}'s last conversation` : `starting a new ${plan.agent} conversation from the task`;
+    console.log(`${bold(plan.task.title)} ${dim(`[${plan.task.id}, ${plan.task.status}]`)}: ${what} in ${plan.worktree}${plan.recreated ? dim(` (worktree recreated on ${plan.branch})`) : ''}`);
+    if (o.dryRun) {
+      console.log(dim(plan.command.map((a) => (/\s/.test(a) ? JSON.stringify(a.length > 80 ? a.slice(0, 80) + '…' : a) : a)).join(' ')));
+      return;
+    }
+    await writeBack(plan.task.file, { changes: {}, log: `${plan.reopened ? 'reopened' : 'started'} an interactive ${plan.agent} session on this task`, by: defaultAuthor() });
+    process.exitCode = (await runInteractive(plan)) ?? 1;
   });
 
 program

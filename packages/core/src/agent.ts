@@ -18,6 +18,10 @@ export interface AgentDefinition {
   command: string[];
   /** Send the prompt on stdin instead of as an argument. */
   stdin?: boolean;
+  /** Command for an interactive session started by a person (`mdpm agent continue`); `{prompt}` is the opening message. */
+  interactive?: string[];
+  /** Command that reopens the latest interactive session in the task's worktree, when the agent can. */
+  continueInteractive?: string[];
   /** Extra arguments to continue an earlier session (`resume` mode), e.g. `[--resume, "{sessionId}"]`. */
   resume?: string[];
   /**
@@ -42,9 +46,12 @@ export const AGENT_PRESETS: Record<string, AgentDefinition> = {
     stdin: true,
     resume: ['--resume', '{sessionId}'],
     output: 'claude-stream',
+    // The prompt goes first: --allowedTools takes a list and would swallow a trailing argument.
+    interactive: ['claude', '{prompt}', '--add-dir', '{root}', '--allowedTools', '{allowedTools}'],
+    continueInteractive: ['claude', '--continue', '--add-dir', '{root}', '--allowedTools', '{allowedTools}'],
   },
-  codex: { name: 'codex', command: ['codex', 'exec', '-'], stdin: true, output: 'text' },
-  cursor: { name: 'cursor', command: ['cursor-agent', '-p', '{prompt}'], output: 'text' },
+  codex: { name: 'codex', command: ['codex', 'exec', '-'], stdin: true, output: 'text', interactive: ['codex', '{prompt}'] },
+  cursor: { name: 'cursor', command: ['cursor-agent', '-p', '{prompt}'], output: 'text', interactive: ['cursor-agent', '{prompt}'] },
 };
 
 export const DEFAULT_AGENT = 'claude';
@@ -70,7 +77,7 @@ export function agentDefinitions(ws: Workspace): { default: string; agents: Reco
   return { default: def, agents };
 }
 
-/** Reads one `agents:` entry: a list of arguments, or `{command, stdin, resume, output}`. Undefined when malformed. */
+/** Reads one `agents:` entry: a list of arguments, or `{command, stdin, resume, output, interactive, continueInteractive}`. Undefined when malformed. */
 export function parseAgentDefinition(name: string, v: unknown): AgentDefinition | undefined {
   const isArgs = (x: unknown): x is string[] => Array.isArray(x) && x.length > 0 && x.every((a) => typeof a === 'string' || typeof a === 'number');
   if (isArgs(v)) return { name, command: v.map(String), output: 'text' };
@@ -85,6 +92,8 @@ export function parseAgentDefinition(name: string, v: unknown): AgentDefinition 
     command,
     stdin: typeof o.stdin === 'boolean' ? o.stdin : o.command !== undefined ? false : base?.stdin,
     resume: isArgs(o.resume) ? o.resume.map(String) : o.command !== undefined ? undefined : base?.resume,
+    interactive: isArgs(o.interactive) ? o.interactive.map(String) : base?.interactive,
+    continueInteractive: isArgs(o.continueInteractive) ? o.continueInteractive.map(String) : base?.continueInteractive,
     output: AGENT_OUTPUTS.includes(o.output as AgentOutput) ? (o.output as AgentOutput) : o.command !== undefined ? 'text' : base?.output,
   };
 }

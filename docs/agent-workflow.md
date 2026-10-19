@@ -305,6 +305,11 @@ Settled during implementation (2026-10-19):
 - **Live output.** The Claude preset uses `--output-format stream-json --verbose`; the runner
   prints each message and tool call as it happens and keeps the raw stream in the run log.
   The stream's `rate_limit_event` (`status`, `resetsAt`) is the primary usage-limit signal.
+- **Continuing a conversation.** `mdpm agent continue <task>` runs the agent interactively in the
+  task's worktree. Claude keeps sessions per working directory, so a worktree recreated at the same
+  path (after a handoff removed it) can still reopen them; verified with `claude -p --resume <id>`
+  and `--continue` against a removed and recreated worktree. It uses `--continue` rather than the
+  run record's session id so that directions given in an earlier interactive session are kept too.
 - **Verified `claude -p` flags** (Claude Code 2.1.303): `--permission-prompts none`,
   `--permission-mode acceptEdits`, `--max-turns`, `--add-dir`, `--allowedTools`,
   `--output-format json` (gives `session_id`, `total_cost_usd`, `subtype`/`terminal_reason`).

@@ -3,7 +3,7 @@ import { existsSync, promises as fs } from 'fs';
 import * as path from 'path';
 import { AgentDefinition, AgentPick, agentDefinitions, agentQueue, expandArgs, lastEntryIsClaim, modeFor, planClaim, writeBack } from './agent';
 import { agentLog, readiness } from './body';
-import { buildPrompt } from './instructions';
+import { buildContinuePrompt, buildPrompt } from './instructions';
 import { applyStatusDefaults, slugify } from './ops';
 import { AgentMode, BLOCKED_STATUS, Task, Workspace } from './types';
 import { previewTaskChange } from './validate';
@@ -222,6 +222,21 @@ function removeWorktree(repo: string, worktree: string): boolean {
   if (!existsSync(worktree)) return true;
   if (git(worktree, ['status', '--porcelain']).out) return false;
   return git(repo, ['worktree', 'remove', worktree]).ok;
+}
+
+/** The latest run record of a task (optionally by one agent), newest first by run id. */
+async function lastRun(dir: string, task: string, agent?: string): Promise<RunRecord | undefined> {
+  const runs = path.join(dir, 'runs');
+  const files = (await fs.readdir(runs).catch(() => [] as string[])).filter((f) => f.endsWith('.json')).sort().reverse();
+  for (const f of files) {
+    try {
+      const r = JSON.parse(await fs.readFile(path.join(runs, f), 'utf8')) as RunRecord;
+      if (r.task === task && (!agent || r.agent === agent)) return r;
+    } catch {
+      // ignore unreadable records
+    }
+  }
+  return undefined;
 }
 
 /** The session id of the agent's latest run on this task, for `resume`. */
@@ -545,4 +560,102 @@ export async function runAgents(opts: RunOptions): Promise<RunSummary> {
     if (record.limited) return { records, stopped: `${agentName} hit its usage limit${lim.text ? `; it resets ${lim.text}` : ''}.` };
   }
   return { records, stopped: opts.dryRun ? 'Dry run: nothing was changed.' : `Reached the limit of ${maxTasks} task${maxTasks > 1 ? 's' : ''}.` };
+}
+
+export interface ContinueOptions {
+  /** Workspace root (the main checkout). */
+  root: string;
+  /** Task id or path. */
+  task: string;
+  /** Agent to talk to; default: the agent of the task's latest run, else its owner if that is an agent, else the default agent. */
+  agent?: string;
+  /** Start a new conversation even if an earlier one can be reopened. */
+  fresh?: boolean;
+  /** Plan only: don't create the worktree or the `mdpm` shims. */
+  dryRun?: boolean;
+  cli?: { node: string; script: string };
+}
+
+export interface ContinuePlan {
+  agent: string;
+  task: Task;
+  worktree: string;
+  branch: string;
+  /** Program and arguments to run, with no placeholders left. */
+  command: string[];
+  env: NodeJS.ProcessEnv;
+  /** True when the agent's earlier conversation is reopened; false for a new one that starts from the task. */
+  reopened: boolean;
+  /** The worktree was missing (removed after handoff) and has been recreated on the task's branch. */
+  recreated: boolean;
+}
+
+/**
+ * Prepares an interactive session with an agent on a task: finds the agent, makes sure the task's
+ * worktree exists (recreating it on branch `agent/<id>` after a handoff removed it), and builds the
+ * command that reopens the agent's last conversation there, or starts a new one that begins with
+ * the task. Task state and the person's directions stay theirs: `MDPM_AGENT` is not set.
+ */
+export async function planContinue(opts: ContinueOptions): Promise<ContinuePlan> {
+  const ws = await loadWorkspace(opts.root);
+  const task = findTask(ws, opts.task);
+  if (!task) throw new RunnerError(`No task with id or path "${opts.task}". Run "mdpm list" to see task ids.`);
+  const defs = agentDefinitions(ws);
+  const repo = gitRoot(ws.root);
+  if (!repo) throw new RunnerError(`${ws.root} is not in a git repository, so there is no branch or worktree to continue in. Run "git init" and make a first commit.`);
+  const dir = await stateDir(repo);
+
+  const previous = await lastRun(dir, task.id, opts.agent);
+  const agentName = opts.agent ?? previous?.agent ?? (task.owner && defs.agents[task.owner] ? task.owner : defs.default);
+  const def = defs.agents[agentName];
+  if (!def) throw new RunnerError(`No agent "${agentName}". Known agents: ${Object.keys(defs.agents).join(', ')}. Define it under "agents:" in the root .proj.`);
+
+  // A task's agent worked in this worktree before, so its conversation can be reopened there.
+  const reopened = !!previous && !opts.fresh && !!def.continueInteractive;
+  const template = reopened ? def.continueInteractive : def.interactive;
+  if (!template) {
+    throw new RunnerError(
+      `Agent "${agentName}" has no "interactive" command, so it can't start a conversation. Add one under agents.${agentName} in the root .proj, e.g.\n  agents:\n    ${agentName}:\n      interactive: [${agentName}, "{prompt}"]`,
+    );
+  }
+
+  const slug = slugify(task.id) || 'task';
+  const branch = `agent/${slug}`;
+  const worktree = path.join(dir, 'worktrees', slug);
+  const recreated = !existsSync(path.join(worktree, '.git'));
+  if (!opts.dryRun) ensureWorktree(repo, worktree, branch);
+
+  const prompt = buildContinuePrompt({ agent: agentName, taskId: task.id, taskFile: task.file, taskText: await fs.readFile(task.file, 'utf8'), root: ws.root, worktree, branch });
+  const command = expandArgs(template, {
+    prompt,
+    taskFile: task.file,
+    taskId: task.id,
+    worktree,
+    root: ws.root,
+    maxTurns: String(task.home.agent.maxTurns),
+    allowedTools: task.home.agent.allowedTools,
+  });
+
+  const env: NodeJS.ProcessEnv = { ...process.env, MDPM_TASK: task.id, MDPM_ROOT: ws.root };
+  delete env.MDPM_AGENT; // the person is directing, so the agent-only restrictions don't apply
+  delete env.ELECTRON_RUN_AS_NODE; // set when launched from VS Code; the shims set it again for mdpm only
+  if (opts.cli && !opts.dryRun) {
+    const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+    env[key] = `${await writeShims(dir, opts.cli)}${path.delimiter}${env[key] ?? ''}`;
+  }
+  return { agent: agentName, task, worktree, branch, command, env, reopened, recreated };
+}
+
+/** Runs a planned interactive session attached to this terminal and resolves with the agent's exit code. */
+export function runInteractive(plan: ContinuePlan): Promise<number | null> {
+  return new Promise((resolve) => {
+    const r = resolveCommand(plan.command[0], plan.command.slice(1), plan.env);
+    const child = spawn(r.file, r.args, { cwd: plan.worktree, env: plan.env, stdio: 'inherit', windowsVerbatimArguments: r.verbatim });
+    child.on('error', (e) => {
+      const hint = (e as NodeJS.ErrnoException).code === 'ENOENT' ? ` "${plan.command[0]}" was not found on PATH. Install it, or point the agent's "interactive" command in the root .proj at the program.` : '';
+      console.error(`${e.message}.${hint}`);
+      resolve(null);
+    });
+    child.on('close', (code) => resolve(code));
+  });
 }

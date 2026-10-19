@@ -144,7 +144,7 @@ function checkAgentDefinitions(a: unknown, add: Add) {
       add('error', 'proj/field-type', 'agents', `Agent "${name}" needs a command: a list of the program and its arguments, e.g.\n  ${name}:\n    command: [${name}, "{prompt}"]`);
       continue;
     }
-    const used = [...def.command, ...(def.resume ?? [])].flatMap((arg) => [...arg.matchAll(/\{(\w+)\}/g)].map((m) => m[1]));
+    const used = [...def.command, ...(def.resume ?? []), ...(def.interactive ?? []), ...(def.continueInteractive ?? [])].flatMap((arg) => [...arg.matchAll(/\{(\w+)\}/g)].map((m) => m[1]));
     const unknown = [...new Set(used.filter((u) => !PLACEHOLDERS.includes(u)))];
     if (unknown.length) {
       add('warning', 'proj/field-value', 'agents', `Agent "${name}" uses unknown placeholder${unknown.length > 1 ? 's' : ''} ${unknown.map((u) => `{${u}}`).join(', ')}; they are passed through as written. Known placeholders: ${PLACEHOLDERS.map((x) => `{${x}}`).join(', ')}.`);

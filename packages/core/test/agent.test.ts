@@ -22,6 +22,7 @@ import {
   loadWorkspace,
   openQuestions,
   parseResetTime,
+  planContinue,
   planBlock,
   planClaim,
   planHandoff,
@@ -31,6 +32,7 @@ import {
   REVIEW_REFINEMENT,
   resolveCommand,
   runAgents,
+  runInteractive,
   streamLimit,
   taskBody,
   writeBack,
@@ -461,5 +463,87 @@ describe('agent run', () => {
     const two = findTask(await loadWorkspace(root), 'two')!;
     expect(agentLog(two.body).at(-1)!.text).toMatch(/exited \(code 0\) without handing off/);
     expect(existsSync(path.join(root, '.mdpm/worktrees/two'))).toBe(true); // kept so the next run resumes in it
+  });
+});
+
+describe('agent continue', () => {
+  const sh = (args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const record = async (over: Record<string, unknown> = {}) => {
+    await write('.mdpm/runs/r-1.json', JSON.stringify({ id: 'r-1', agent: 'claude', task: 'one', sessionId: 's-1', ...over }));
+  };
+
+  beforeEach(async () => {
+    await write('one.md', task('title: One\nstatus: review\nowner: claude\nstart: 2026-10-01', `${READY}\n## Agent log\n\n- 2026-10-19 10:00 claude — handed off for review: did it\n`));
+    sh(['init', '-q']);
+    sh(['-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A']);
+    sh(['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init']);
+  });
+
+  it('reopens the last conversation in a worktree recreated on the task branch', async () => {
+    await record();
+    sh(['branch', 'agent/one']); // the branch outlives the worktree that a handoff removes
+    const plan = await planContinue({ root, task: 'one' });
+    expect(plan).toMatchObject({ agent: 'claude', branch: 'agent/one', reopened: true, recreated: true });
+    expect(plan.command.slice(0, 2)).toEqual(['claude', '--continue']);
+    expect(plan.command).toContain(root);
+    expect(plan.command).toContain('Bash(mdpm *)');
+    expect(existsSync(path.join(plan.worktree, '.git'))).toBe(true);
+    expect(sh(['-C', plan.worktree, 'branch', '--show-current'])).toBe('agent/one');
+    expect(plan.env).toMatchObject({ MDPM_TASK: 'one', MDPM_ROOT: root });
+
+    const again = await planContinue({ root, task: 'one' });
+    expect(again.recreated).toBe(false);
+  });
+
+  it('starts a new conversation from the task when there is no earlier run, or when asked to', async () => {
+    const first = await planContinue({ root, task: 'one' });
+    expect(first).toMatchObject({ agent: 'claude', reopened: false });
+    expect(first.command[0]).toBe('claude');
+    expect(first.command[1]).toContain('A person is here with you now');
+    expect(first.command[1]).toContain('handed off for review: did it');
+    expect(first.command[1]).toContain(path.join(root, 'one.md'));
+    expect(first.command).not.toContain('--continue');
+
+    await record();
+    expect((await planContinue({ root, task: 'one' })).reopened).toBe(true);
+    expect((await planContinue({ root, task: 'one', fresh: true })).reopened).toBe(false);
+  });
+
+  it('never sets MDPM_AGENT, because the person is directing the agent', async () => {
+    process.env.MDPM_AGENT = 'claude';
+    try {
+      expect((await planContinue({ root, task: 'one' })).env.MDPM_AGENT).toBeUndefined();
+    } finally {
+      delete process.env.MDPM_AGENT;
+    }
+  });
+
+  it('picks the agent of the last run, then the owner, and honours --agent', async () => {
+    await write('.proj', 'name: Root\nagents:\n  mine:\n    command: [mine, "{prompt}"]\n    interactive: [mine, chat, "{prompt}"]\n');
+    await record({ agent: 'mine', sessionId: undefined });
+    expect((await planContinue({ root, task: 'one' })).agent).toBe('mine');
+    expect((await planContinue({ root, task: 'one', agent: 'cursor' })).agent).toBe('cursor');
+    await fs.rm(path.join(root, '.mdpm/runs/r-1.json'));
+    expect((await planContinue({ root, task: 'one' })).agent).toBe('claude'); // owner
+  });
+
+  it('explains how to add an interactive command to an agent that has none', async () => {
+    await write('.proj', 'name: Root\nagents:\n  mine:\n    command: [mine, "{prompt}"]\n');
+    await expect(planContinue({ root, task: 'one', agent: 'mine' })).rejects.toThrow(/no "interactive" command.*agents\.mine.*interactive: \[mine, "\{prompt\}"\]/s);
+    await expect(planContinue({ root, task: 'nope' })).rejects.toThrow(/No task with id or path "nope"/);
+  });
+
+  it('a dry run creates nothing', async () => {
+    const plan = await planContinue({ root, task: 'one', dryRun: true });
+    expect(existsSync(plan.worktree)).toBe(false);
+    expect(sh(['branch', '--list', 'agent/*'])).toBe('');
+  });
+
+  it('runs the command attached to the terminal and returns its exit code', async () => {
+    const plan = await planContinue({ root, task: 'one' });
+    plan.command = [process.execPath, '-e', 'process.exit(process.env.MDPM_TASK === "one" && process.cwd().includes("worktrees") ? 7 : 1)'];
+    expect(await runInteractive(plan)).toBe(7);
+    plan.command = ['definitely-not-a-program-xyz'];
+    expect(await runInteractive(plan)).toBeNull();
   });
 });

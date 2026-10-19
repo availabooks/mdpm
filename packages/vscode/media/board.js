@@ -16,12 +16,16 @@
         : '',
     ].join('');
     const agent = mdpm.model.defaultAgent;
+    // Talk to the agent that worked on the task: its conversation reopens in the task's worktree.
+    const chat = t.agentOwned && t.status !== 'backlog'
+      ? `<button class="act more" data-action="continue" title="Continue with ${esc(t.owner)}: reopen its conversation to give more directions">💬</button>`
+      : '';
     const actions =
-      t.status === BLOCKED
+      (t.status === BLOCKED
         ? `<button class="act" data-action="unblock" title="Unblock: open the questions and move back to todo">Unblock</button>`
         : mdpm.canSendToAgent(t)
           ? `<button class="act" data-action="send" title="Send to ${esc(agent)} (runs it now in a terminal)">▶ ${esc(agent)}</button><button class="act more" data-action="sendAs" title="Send to another agent…">▾</button>`
-          : '';
+          : '') + chat;
     return `
       <div class="card${t.status === BLOCKED ? ' blocked' : ''}" draggable="true" data-key="${esc(t.key)}" title="${esc(t.relPath)}" style="--accent:${mdpm.statusColor(t)}">
         ${actions ? `<div class="card-actions">${actions}</div>` : ''}
