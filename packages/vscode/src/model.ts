@@ -1,4 +1,19 @@
-import { Issue, Project, Task, Workspace, applyStatusDefaults, loadWorkspace, previewTaskChange, toPosix, updateTask } from '@mdpm/core';
+import {
+  BLOCKED_STATUS,
+  Issue,
+  Project,
+  Task,
+  WriteBack,
+  Workspace,
+  agentDefinitions,
+  agentNames,
+  applyStatusDefaults,
+  bodyAfter,
+  loadWorkspace,
+  previewTaskChange,
+  toPosix,
+  writeBack,
+} from '@mdpm/core';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -28,6 +43,8 @@ export interface TaskDTO {
   projects: string[];
   shared: boolean;
   relPath: string;
+  /** The owner is an agent (shown with a robot badge). */
+  agentOwned: boolean;
 }
 
 export interface ModelDTO {
@@ -35,6 +52,8 @@ export interface ModelDTO {
   tasks: TaskDTO[];
   statuses: string[];
   owners: string[];
+  /** Agent that "Send to agent" uses (setting `mdpm.agent.default`). */
+  defaultAgent: string;
 }
 
 function describe(issues: Issue[]): string {
@@ -131,10 +150,10 @@ export class Model implements vscode.Disposable {
    * Writes front matter changes after validating them. Errors ask for confirmation
    * ("Save Anyway"); warnings are shown after saving. Returns whether the file was written.
    */
-  async update(task: Task, requested: Record<string, unknown>): Promise<boolean> {
-    const changes = applyStatusDefaults(task, requested);
+  async update(task: Task, requested: Record<string, unknown>, log?: { text: string; by: string }): Promise<boolean> {
+    const wb: WriteBack = { changes: applyStatusDefaults(task, requested), log: log?.text, by: log?.by ?? '' };
     const ws = this.workspaces.find((w) => w.tasks.includes(task));
-    const issues = ws ? previewTaskChange(ws, task, changes) : [];
+    const issues = ws ? previewTaskChange(ws, task, wb.changes, bodyAfter(task, wb)) : [];
     const errors = issues.filter((i) => i.level === 'error');
     if (errors.length) {
       const choice = await vscode.window.showErrorMessage(
@@ -147,11 +166,35 @@ export class Model implements vscode.Disposable {
         return false;
       }
     }
-    await updateTask(task.file, changes);
+    await writeBack(task.file, wb);
     await this.reload();
     const warnings = issues.filter((i) => i.level === 'warning');
     if (warnings.length) vscode.window.showWarningMessage(`mdpm: saved "${task.title}", with warnings: ${describe(warnings)}`);
     return true;
+  }
+
+  workspaceOf(task: Task): Workspace | undefined {
+    return this.workspaces.find((w) => w.tasks.includes(task));
+  }
+
+  /** Agent names, the default first: the presets plus any defined in root .proj files. */
+  agents(): string[] {
+    const names = new Set(this.workspaces.flatMap((w) => Object.keys(agentDefinitions(w).agents)));
+    const def = this.defaultAgent();
+    return [def, ...[...names].filter((n) => n !== def).sort()];
+  }
+
+  defaultAgent(): string {
+    return vscode.workspace.getConfiguration('mdpm').get<string>('agent.default')?.trim() || 'claude';
+  }
+
+  isAgent(task: Task): boolean {
+    const ws = this.workspaceOf(task);
+    return !!task.owner && !!ws && agentNames(ws).has(task.owner);
+  }
+
+  isBlocked(task: Task): boolean {
+    return task.status === BLOCKED_STATUS;
   }
 
   project(key: string): Project | undefined {
@@ -179,8 +222,9 @@ export class Model implements vscode.Disposable {
     };
     for (const ws of this.workspaces) ws.projects.filter((p) => !p.parent).forEach((p) => visit(p, 0, ws));
 
-    const tasks: TaskDTO[] = this.workspaces.flatMap((ws) =>
-      ws.tasks.map((t) => ({
+    const tasks: TaskDTO[] = this.workspaces.flatMap((ws) => {
+      const agents = agentNames(ws);
+      return ws.tasks.map((t) => ({
         key: t.file,
         id: t.id,
         title: t.title,
@@ -195,14 +239,16 @@ export class Model implements vscode.Disposable {
         projects: t.locations.map((l) => l.project.file),
         shared: t.locations.length > 1,
         relPath: this.relPath(ws, t.file),
-      })),
-    );
+        agentOwned: !!t.owner && agents.has(t.owner),
+      }));
+    });
 
     return {
       projects,
       tasks,
       statuses: [...new Set(projects.flatMap((p) => p.statuses))],
       owners: [...new Set(tasks.map((t) => t.owner).filter((o): o is string => !!o))].sort(),
+      defaultAgent: this.defaultAgent(),
     };
   }
 

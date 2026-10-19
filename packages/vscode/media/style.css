@@ -135,6 +135,18 @@ button:hover { background: var(--vscode-button-secondaryHoverBackground); }
   color: var(--vscode-textLink-foreground);
 }
 .card-project { margin-top: 6px; font-size: 0.8em; color: var(--muted); }
+.card { position: relative; }
+.card-actions { position: absolute; top: 4px; right: 4px; display: none; gap: 1px; }
+.card:hover .card-actions, .card:focus-within .card-actions { display: flex; }
+.card-actions .act { padding: 1px 7px; font-size: 0.85em; color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+.card-actions .act:hover { background: var(--vscode-button-hoverBackground); }
+.card-actions .act.more { padding: 1px 5px; }
+.card-meta .owner.agent { background: color-mix(in srgb, var(--vscode-charts-purple) 30%, var(--vscode-badge-background)); }
+
+/* Blocked: yellow, so it is seen at a glance */
+.column.blocked { border-color: var(--vscode-charts-yellow); background: color-mix(in srgb, var(--vscode-charts-yellow) 8%, var(--surface)); }
+.column.blocked header { color: var(--vscode-charts-yellow); }
+.card.blocked { background: color-mix(in srgb, var(--vscode-charts-yellow) 12%, var(--card)); border-color: color-mix(in srgb, var(--vscode-charts-yellow) 55%, var(--border)); }
 
 /* Waterfall */
 .wf-scroll { height: 100%; overflow: auto; }

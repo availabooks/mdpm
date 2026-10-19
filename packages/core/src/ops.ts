@@ -3,6 +3,7 @@ import { existsSync, promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { stringify } from 'yaml';
+import { taskBody } from './body';
 import { serializeFrontMatter, splitFrontMatter, updateFrontMatter } from './frontmatter';
 import { toPosix } from './build';
 import { isTaskFile } from './workspace';
@@ -18,7 +19,7 @@ export interface NewTask {
   priority?: string | number;
   tags?: string[];
   dependsOn?: string[];
-  /** Markdown body; defaults to a small template. */
+  /** Markdown body; defaults to the `default` template (see `taskBody`). */
   body?: string;
   /** Any additional front matter keys. */
   extra?: Record<string, unknown>;
@@ -98,7 +99,7 @@ export function nextTaskPath(dir: string, title: string, extension: TaskExtensio
 
 /** Creates a new task file in `dir` and returns its path. Never overwrites an existing file. */
 export async function createTask(dir: string, task: NewTask, extension: TaskExtension = '.md'): Promise<string> {
-  const body = task.body ?? `\n# ${task.title}\n\n## Description\n\n\n## Acceptance criteria\n\n- [ ] \n`;
+  const body = task.body ?? taskBody(task.title);
   const content = serializeFrontMatter(newTaskMeta(task), body);
   await fs.mkdir(dir, { recursive: true });
   for (;;) {

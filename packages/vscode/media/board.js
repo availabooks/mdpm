@@ -23,10 +23,20 @@
       t.priority !== undefined ? `<span class="badge prio">${esc(String(t.priority).match(/^\d/) ? `P${t.priority}` : t.priority)}</span>` : '',
       t.end ? `<span class="${overdue ? 'due overdue' : 'due'}" title="${esc(`${t.start ?? '?'} → ${t.end}`)}">⏱ ${esc(t.end)}</span>` : '',
       t.shared ? `<span class="shared" title="Shared with ${t.projects.length} projects">🔗${t.projects.length}</span>` : '',
-      t.owner ? `<span class="owner" title="${esc(t.owner)}">${esc(t.owner)}</span>` : '',
+      t.owner
+        ? `<span class="owner${t.agentOwned ? ' agent' : ''}" title="${esc(t.agentOwned ? `Agent: ${t.owner}` : t.owner)}">${t.agentOwned ? '🤖 ' : ''}${esc(t.owner)}</span>`
+        : '',
     ].join('');
+    const agent = mdpm.model.defaultAgent;
+    const actions =
+      t.status === BLOCKED
+        ? `<button class="act" data-action="unblock" title="Unblock: open the questions and move back to todo">Unblock</button>`
+        : mdpm.canSendToAgent(t)
+          ? `<button class="act" data-action="send" title="Send to ${esc(agent)} (runs it now in a terminal)">▶ ${esc(agent)}</button><button class="act more" data-action="sendAs" title="Send to another agent…">▾</button>`
+          : '';
     return `
-      <div class="card" draggable="true" data-key="${esc(t.key)}" title="${esc(t.relPath)}" style="--accent:${mdpm.statusColor(t)}">
+      <div class="card${t.status === BLOCKED ? ' blocked' : ''}" draggable="true" data-key="${esc(t.key)}" title="${esc(t.relPath)}" style="--accent:${mdpm.statusColor(t)}">
+        ${actions ? `<div class="card-actions">${actions}</div>` : ''}
         <div class="card-title">${esc(t.title)}</div>
         <div class="card-meta">${meta}</div>
         ${t.tags.length ? `<div class="tags">${t.tags.map((x) => `<span class="tag">${esc(x)}</span>`).join('')}</div>` : ''}
@@ -61,7 +71,7 @@
       .map((status) => {
         const col = sorted(tasks.filter((t) => t.status === status));
         return `
-          <section class="column" data-status="${esc(status)}">
+          <section class="column${status === BLOCKED ? ' blocked' : ''}" data-status="${esc(status)}">
             <header><span class="col-name">${esc(status)}</span><span class="count">${col.length}</span>
               <button class="col-add" data-status="${esc(status)}" title="New task in “${esc(status)}”">＋</button></header>
             <div class="cards">${col.map(card).join('')}</div>
@@ -72,6 +82,12 @@
   }
 
   function wire() {
+    for (const b of app.querySelectorAll('.card .act')) {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        mdpm.post({ type: 'agent', action: b.dataset.action, file: b.closest('.card').dataset.key });
+      });
+    }
     for (const el of app.querySelectorAll('.card')) {
       el.addEventListener('click', () => mdpm.post({ type: 'open', file: el.dataset.key }));
       el.addEventListener('dragstart', (e) => {

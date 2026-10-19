@@ -5,7 +5,10 @@ const vscode = acquireVsCodeApi();
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-const STATUS_COLORS = ['--vscode-charts-blue', '--vscode-charts-yellow', '--vscode-charts-purple', '--vscode-charts-orange'];
+// Yellow is reserved for "blocked", so it stands out wherever it appears.
+const STATUS_COLORS = ['--vscode-charts-blue', '--vscode-charts-purple', '--vscode-charts-orange'];
+const BLOCKED = 'blocked';
+const BLOCKED_COLOR = 'var(--vscode-charts-yellow)';
 
 const mdpm = {
   model: null,
@@ -53,11 +56,17 @@ const mdpm = {
   },
 
   statusColor(task) {
-    const s = this.statuses(task);
+    if (task.status === BLOCKED) return BLOCKED_COLOR;
+    const s = this.statuses(task).filter((x) => x !== BLOCKED);
     const i = s.indexOf(task.status);
     if (i === s.length - 1) return 'var(--vscode-charts-green)';
     if (i <= 0) return 'var(--vscode-descriptionForeground)';
     return `var(${STATUS_COLORS[(i - 1) % STATUS_COLORS.length]})`;
+  },
+
+  /** Agents only pick up backlog, todo and in-progress tasks. */
+  canSendToAgent(task) {
+    return ['backlog', 'todo', 'in-progress'].includes(task.status);
   },
 
   /** Builds the toolbar once; later calls only refresh the dropdown options. */

@@ -1,4 +1,4 @@
-import { Project, Task, TaskLocation } from '@mdpm/core';
+import { BLOCKED_STATUS, Project, Task, TaskLocation } from '@mdpm/core';
 import * as vscode from 'vscode';
 import { Model } from './model';
 
@@ -43,9 +43,11 @@ export class ProjectTree implements vscode.TreeDataProvider<Node> {
     const { task, location } = node;
     const item = new vscode.TreeItem(task.title, vscode.TreeItemCollapsibleState.None);
     item.id = location.path;
-    item.contextValue = location.link ? 'taskLink' : 'task';
+    // e.g. "taskLink:blocked"; menus match the start with /^task/ and the state with /:blocked/.
+    item.contextValue = `${location.link ? 'taskLink' : 'task'}:${task.status === BLOCKED_STATUS ? 'blocked' : isFinal(task) ? 'done' : 'open'}`;
     item.iconPath = statusIcon(task);
-    item.description = [task.status, task.owner && `@${task.owner}`, location.link && '↪ linked'].filter(Boolean).join(' · ');
+    const owner = task.owner && `${this.model.isAgent(task) ? '🤖 ' : '@'}${task.owner}`;
+    item.description = [task.status, owner, location.link && '↪ linked'].filter(Boolean).join(' · ');
     item.resourceUri = vscode.Uri.file(task.file);
     item.tooltip = new vscode.MarkdownString(
       [
@@ -67,9 +69,14 @@ function statusRank(t: Task): number {
   return i < 0 ? 999 : i;
 }
 
+function isFinal(t: Task): boolean {
+  return t.status === t.home.statuses[t.home.statuses.length - 1];
+}
+
 function statusIcon(t: Task): vscode.ThemeIcon {
   const i = t.home.statuses.indexOf(t.status);
   const last = t.home.statuses.length - 1;
+  if (t.status === BLOCKED_STATUS) return new vscode.ThemeIcon('warning', new vscode.ThemeColor('charts.yellow'));
   if (i === last) return new vscode.ThemeIcon('pass-filled', new vscode.ThemeColor('charts.green'));
   if (i <= 0) return new vscode.ThemeIcon('circle-large-outline');
   return new vscode.ThemeIcon('circle-large-filled', new vscode.ThemeColor('charts.blue'));
