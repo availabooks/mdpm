@@ -20,7 +20,8 @@
     "build": "npm run build -w @mdpm/cli -w mdpm-vscode",
     "typecheck": "tsc -p packages/core --noEmit && tsc -p packages/cli --noEmit && tsc -p packages/vscode --noEmit",
     "test": "vitest run",
-    "mdpm": "node packages/cli/dist/mdpm.js"
+    "mdpm": "node packages/cli/dist/mdpm.js",
+    "install-extension": "npm run package -w mdpm-vscode && code --install-extension packages/vscode/mdpm-vscode.vsix --force"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

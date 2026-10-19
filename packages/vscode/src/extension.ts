@@ -1,4 +1,4 @@
-import { Project, Task, createProject, createTask, defaultAuthor, linkTask, newTaskMeta, nextTaskPath, previewNewTask, slugify, unlinkTask } from '@mdpm/core';
+import { Project, Task, createProject, createTask, defaultAuthor, isFinalStatus, linkTask, newTaskMeta, nextTaskPath, previewNewTask, slugify, today, unlinkTask } from '@mdpm/core';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Model } from './model';
@@ -74,7 +74,8 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!title?.trim()) return;
       const status = arg && 'status' in arg && arg.status ? arg.status : project.statuses[0];
       const owner = vscode.workspace.getConfiguration('mdpm').get<string>('defaultOwner') || undefined;
-      const task = { title: title.trim(), status, owner, author: defaultAuthor(project.dir) };
+      const end = isFinalStatus(project, status) ? today() : undefined;
+      const task = { title: title.trim(), status, owner, author: defaultAuthor(project.dir), end };
       const ws = model.workspaces.find((w) => w.projects.includes(project));
       const errors = ws
         ? previewNewTask(ws, project, nextTaskPath(project.dir, task.title, project.taskExtension), newTaskMeta(task)).filter((i) => i.level === 'error')

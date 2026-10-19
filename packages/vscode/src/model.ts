@@ -1,4 +1,4 @@
-import { Issue, Project, Task, Workspace, loadWorkspace, previewTaskChange, toPosix, updateTask } from '@mdpm/core';
+import { Issue, Project, Task, Workspace, applyStatusDefaults, loadWorkspace, previewTaskChange, toPosix, updateTask } from '@mdpm/core';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -131,7 +131,8 @@ export class Model implements vscode.Disposable {
    * Writes front matter changes after validating them. Errors ask for confirmation
    * ("Save Anyway"); warnings are shown after saving. Returns whether the file was written.
    */
-  async update(task: Task, changes: Record<string, unknown>): Promise<boolean> {
+  async update(task: Task, requested: Record<string, unknown>): Promise<boolean> {
+    const changes = applyStatusDefaults(task, requested);
     const ws = this.workspaces.find((w) => w.tasks.includes(task));
     const issues = ws ? previewTaskChange(ws, task, changes) : [];
     const errors = issues.filter((i) => i.level === 'error');

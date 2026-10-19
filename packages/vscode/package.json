@@ -28,7 +28,7 @@
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --platform=node --target=node18 --format=cjs --external:vscode --outfile=dist/extension.js --minify",
     "watch": "npm run build -- --watch --sourcemap",
-    "package": "npm run build && vsce package --no-dependencies"
+    "package": "npm run build && vsce package --no-dependencies --out mdpm-vscode.vsix"
   },
   "dependencies": {
     "@mdpm/core": "*"

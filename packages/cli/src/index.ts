@@ -3,12 +3,14 @@ import {
   Project,
   Task,
   Workspace,
+  applyStatusDefaults,
   createProject,
   createTask,
   defaultAuthor,
   findProject,
   findRoot,
   findTask,
+  isFinalStatus,
   linkTask,
   loadWorkspace,
   newTaskMeta,
@@ -19,6 +21,7 @@ import {
   suggest,
   tasksInProject,
   toPosix,
+  today,
   unlinkTask,
   updateTask,
 } from '@mdpm/core';
@@ -259,13 +262,15 @@ program
     const project = o.project ? getProject(ws, o.project as string) : currentProject(ws);
     const list = (v: unknown) => (typeof v === 'string' ? v.split(',').map((s) => s.trim()).filter(Boolean) : undefined);
     const priority = o.priority === undefined ? undefined : parseYaml(o.priority as string);
+    const status = (o.status as string) ?? project.statuses[0];
     const task = {
       title: words.join(' '),
-      status: (o.status as string) ?? project.statuses[0],
+      status,
       owner: o.owner as string | undefined,
       author: (o.author as string) ?? defaultAuthor(),
       start: o.start as string | undefined,
-      end: o.end as string | undefined,
+      // A task created as done ended today, unless told otherwise.
+      end: (o.end as string | undefined) ?? (isFinalStatus(project, status) ? today() : undefined),
       priority,
       tags: list(o.tags),
       dependsOn: list(o.depends),
@@ -318,7 +323,7 @@ program
   .action(async (ref: string, pairs: string[], o: { force?: boolean }) => {
     const ws = await load();
     const t = getTask(ws, ref);
-    const changes = parseAssignments(pairs);
+    const changes = applyStatusDefaults(t, parseAssignments(pairs));
     guard(ws, previewTaskChange(ws, t, changes), o.force);
     await updateTask(t.file, changes);
     console.log(`Updated ${rel(ws, t.file)}`);
@@ -331,8 +336,9 @@ program
   .action(async (ref: string, status: string, o: { force?: boolean }) => {
     const ws = await load();
     const t = getTask(ws, ref);
-    guard(ws, previewTaskChange(ws, t, { status }), o.force);
-    await updateTask(t.file, { status });
+    const changes = applyStatusDefaults(t, { status });
+    guard(ws, previewTaskChange(ws, t, changes), o.force);
+    await updateTask(t.file, changes);
     console.log(`${t.id}: ${t.status} → ${status}`);
   });
 

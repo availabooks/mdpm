@@ -6,7 +6,7 @@ import { stringify } from 'yaml';
 import { serializeFrontMatter, splitFrontMatter, updateFrontMatter } from './frontmatter';
 import { toPosix } from './build';
 import { isTaskFile } from './workspace';
-import { LinkKind, PROJECT_FILE, ProjectMeta, TaskExtension } from './types';
+import { LinkKind, PROJECT_FILE, Project, ProjectMeta, Task, TaskExtension } from './types';
 
 export interface NewTask {
   title: string;
@@ -22,6 +22,37 @@ export interface NewTask {
   body?: string;
   /** Any additional front matter keys. */
   extra?: Record<string, unknown>;
+}
+
+/** True when `status` is the project's final ("done") status, i.e. the last of its statuses. */
+export function isFinalStatus(project: Project, status: string | undefined): boolean {
+  return status !== undefined && status === project.statuses[project.statuses.length - 1];
+}
+
+/** The status that marks work as started. */
+export const STARTED_STATUS = 'in-progress';
+
+/**
+ * Adds the dates a status change implies, unless the task already has them or the change sets them:
+ * - moving to the project's final ("done") status sets `end` to today;
+ * - moving to `in-progress`, or any later status before the final one (e.g. `blocked`, `review`),
+ *   sets `start` to today. Projects without an `in-progress` status don't get this.
+ */
+export function applyStatusDefaults(task: Task, changes: Record<string, unknown>): Record<string, unknown> {
+  const status = typeof changes.status === 'string' ? changes.status : undefined;
+  if (status === undefined) return changes;
+  const missing = (k: 'start' | 'end') => !(k in changes) && [undefined, null, ''].includes(task.meta[k] as string | null | undefined);
+  const statuses = task.home.statuses;
+  const started = statuses.indexOf(STARTED_STATUS);
+  const at = statuses.indexOf(status);
+
+  const out = { ...changes };
+  if (isFinalStatus(task.home, status)) {
+    if (missing('end')) out.end = today();
+  } else if (started >= 0 && at >= started && missing('start')) {
+    out.start = today();
+  }
+  return out;
 }
 
 /** Rewrites front matter keys of a task file in place. `null`/`undefined`/`''` delete a key. */

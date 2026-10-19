@@ -2,7 +2,7 @@ import { promises as fs, mkdtempSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { Issue, findProject, findTask, loadWorkspace, previewNewTask, previewTaskChange } from '../src';
+import { Issue, applyStatusDefaults, findProject, findTask, loadWorkspace, previewNewTask, previewTaskChange, today } from '../src';
 
 let root: string;
 
@@ -147,6 +147,39 @@ describe('previewing writes', () => {
     expect(previewTaskChange(ws, a, { status: 'doing' }).map((i) => i.code)).toEqual(['task/required-missing']);
     expect(previewTaskChange(ws, a, { status: 'doing', owner: 'claude' })).toEqual([]);
     expect(previewTaskChange(ws, a, { status: 'shipped' }).map((i) => i.code)).toEqual(['task/status-unknown']);
+  });
+
+  it('sets end to today when a task moves to the final status, so a done-requires-end rule passes', async () => {
+    await write('.proj', 'statuses: [todo, doing, done]\nrequiredByStatus:\n  done: [end]\n');
+    await write('c.md', task('status: todo\nend: 2026-01-31'));
+    const ws = await loadWorkspace(root);
+    const b = findTask(ws, 'b')!;
+    const changes = applyStatusDefaults(b, { status: 'done' });
+    expect(changes).toEqual({ status: 'done', end: today() });
+    expect(previewTaskChange(ws, b, changes)).toEqual([]);
+    // Existing or explicitly given end dates are kept; other statuses are untouched.
+    expect(applyStatusDefaults(findTask(ws, 'c')!, { status: 'done' })).toEqual({ status: 'done' });
+    expect(applyStatusDefaults(b, { status: 'done', end: '2026-02-01' })).toEqual({ status: 'done', end: '2026-02-01' });
+    expect(applyStatusDefaults(b, { status: 'doing' })).toEqual({ status: 'doing' });
+  });
+
+  it('sets start to today when work starts, i.e. at in-progress or a later non-final status', async () => {
+    await write('.proj', 'statuses: [backlog, todo, in-progress, blocked, review, done]\n');
+    await write('c.md', task('status: todo\nstart: 2026-01-05'));
+    const ws = await loadWorkspace(root);
+    const b = findTask(ws, 'b')!;
+    for (const status of ['in-progress', 'blocked', 'review']) {
+      expect(applyStatusDefaults(b, { status })).toEqual({ status, start: today() });
+    }
+    expect(applyStatusDefaults(b, { status: 'todo' })).toEqual({ status: 'todo' });
+    expect(applyStatusDefaults(b, { status: 'done' })).toEqual({ status: 'done', end: today() });
+    expect(applyStatusDefaults(findTask(ws, 'c')!, { status: 'in-progress' })).toEqual({ status: 'in-progress' });
+    expect(applyStatusDefaults(b, { status: 'in-progress', start: '2026-02-01' })).toEqual({ status: 'in-progress', start: '2026-02-01' });
+  });
+
+  it('does not set start in projects without an in-progress status', async () => {
+    const ws = await loadWorkspace(root); // statuses: todo, doing, done
+    expect(applyStatusDefaults(findTask(ws, 'b')!, { status: 'doing' })).toEqual({ status: 'doing' });
   });
 
   it('catches dependency cycles introduced by a change', async () => {

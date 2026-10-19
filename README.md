@@ -44,7 +44,10 @@ requiredByStatus:         # extra fields a task needs before it may enter a stat
 `statuses`, `taskExtension`, `required` and `requiredByStatus` are inherited by sub projects
 that don't set their own. The
 default statuses are `backlog, todo, in-progress, review, done`. The **last** status is
-treated as "done" (for overdue highlighting and the waterfall view).
+treated as "done" (for overdue highlighting and the waterfall view). Moving a task to it, from
+the CLI or VS Code, sets `end` to today if the task doesn't have an end date yet. Likewise,
+moving a task to `in-progress` (or a later status such as `blocked` or `review`) sets `start`
+to today if it has no start date. Dates you set yourself are never overwritten.
 
 ### Tasks: `*.md` or `*.task`
 
@@ -177,11 +180,13 @@ printf '#!/bin/sh\nnpx mdpm check --strict\n' > .git/hooks/pre-commit && chmod +
 ## VS Code extension
 
 ```bash
-npm run build && cd packages/vscode && npx vsce package --no-dependencies
-code --install-extension mdpm-vscode-0.1.0.vsix
+npm run install-extension     # build, package and install into your VS Code
 ```
 
-Or open this repo in VS Code and press F5 (*Run Extension*) for a development host.
+Then run **Developer: Reload Window** (Cmd/Ctrl+Shift+P). The extension activates in any
+workspace containing a `.proj` file. After changing the extension's code, run the same two
+steps again. To debug it with breakpoints instead, press F5 (*Run Extension*), which opens
+a separate development window.
 
 - **Projects view** (activity bar): project tree with tasks; right-click to set status/owner,
   link a task into another project, create tasks and sub projects.
