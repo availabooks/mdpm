@@ -1,0 +1,257 @@
+{
+  "name": "mdpm-vscode",
+  "displayName": "mdpm — Markdown Projects & Tasks",
+  "description": "Kanban board, waterfall timeline and project tree for markdown tasks that live in your repo",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/availabooks/mdpm.git",
+    "directory": "packages/vscode"
+  },
+  "homepage": "https://github.com/availabooks/mdpm#readme",
+  "bugs": {
+    "url": "https://github.com/availabooks/mdpm/issues"
+  },
+  "version": "0.1.0",
+  "publisher": "mdpm",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "workspaceContains:**/.proj"
+  ],
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=node --target=node18 --format=cjs --external:vscode --outfile=dist/extension.js --minify",
+    "watch": "npm run build -- --watch --sourcemap",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "@mdpm/core": "*"
+  },
+  "devDependencies": {
+    "@types/vscode": "~1.90.0",
+    "@vscode/vsce": "^3.1.0"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "markdown",
+        "extensions": [
+          ".task"
+        ]
+      },
+      {
+        "id": "yaml",
+        "filenames": [
+          ".proj"
+        ]
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "mdpm",
+          "title": "mdpm",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "mdpm": [
+        {
+          "id": "mdpm.projects",
+          "name": "Projects",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "mdpm.projects",
+        "contents": "No projects found. A project is any folder with a .proj file.\n[Create a project](command:mdpm.newProject)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "mdpm.refresh",
+        "title": "Refresh",
+        "category": "mdpm",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "mdpm.openBoard",
+        "title": "Open Kanban Board",
+        "category": "mdpm",
+        "icon": "$(project)"
+      },
+      {
+        "command": "mdpm.openWaterfall",
+        "title": "Open Waterfall Timeline",
+        "category": "mdpm",
+        "icon": "$(graph-line)"
+      },
+      {
+        "command": "mdpm.newTask",
+        "title": "New Task",
+        "category": "mdpm",
+        "icon": "$(add)"
+      },
+      {
+        "command": "mdpm.newProject",
+        "title": "New Project",
+        "category": "mdpm",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "mdpm.setStatus",
+        "title": "Set Status…",
+        "category": "mdpm"
+      },
+      {
+        "command": "mdpm.setOwner",
+        "title": "Set Owner…",
+        "category": "mdpm"
+      },
+      {
+        "command": "mdpm.linkTask",
+        "title": "Add to Another Project (link)…",
+        "category": "mdpm"
+      },
+      {
+        "command": "mdpm.unlinkTask",
+        "title": "Remove from This Project (unlink)",
+        "category": "mdpm"
+      },
+      {
+        "command": "mdpm.openProjectFile",
+        "title": "Edit Project Settings (.proj)",
+        "category": "mdpm"
+      },
+      {
+        "command": "mdpm.revealInExplorer",
+        "title": "Reveal in Explorer",
+        "category": "mdpm"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "mdpm.newTask",
+          "when": "view == mdpm.projects",
+          "group": "navigation@1"
+        },
+        {
+          "command": "mdpm.openBoard",
+          "when": "view == mdpm.projects",
+          "group": "navigation@2"
+        },
+        {
+          "command": "mdpm.openWaterfall",
+          "when": "view == mdpm.projects",
+          "group": "navigation@3"
+        },
+        {
+          "command": "mdpm.refresh",
+          "when": "view == mdpm.projects",
+          "group": "navigation@4"
+        },
+        {
+          "command": "mdpm.newProject",
+          "when": "view == mdpm.projects",
+          "group": "more"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "mdpm.newTask",
+          "when": "viewItem == project",
+          "group": "inline"
+        },
+        {
+          "command": "mdpm.newTask",
+          "when": "viewItem == project",
+          "group": "1_create@1"
+        },
+        {
+          "command": "mdpm.newProject",
+          "when": "viewItem == project",
+          "group": "1_create@2"
+        },
+        {
+          "command": "mdpm.openBoard",
+          "when": "viewItem == project",
+          "group": "2_view@1"
+        },
+        {
+          "command": "mdpm.openWaterfall",
+          "when": "viewItem == project",
+          "group": "2_view@2"
+        },
+        {
+          "command": "mdpm.openProjectFile",
+          "when": "viewItem == project",
+          "group": "3_edit"
+        },
+        {
+          "command": "mdpm.setStatus",
+          "when": "viewItem =~ /^task/",
+          "group": "1_edit@1"
+        },
+        {
+          "command": "mdpm.setOwner",
+          "when": "viewItem =~ /^task/",
+          "group": "1_edit@2"
+        },
+        {
+          "command": "mdpm.linkTask",
+          "when": "viewItem =~ /^task/",
+          "group": "2_link@1"
+        },
+        {
+          "command": "mdpm.unlinkTask",
+          "when": "viewItem == taskLink",
+          "group": "2_link@2"
+        },
+        {
+          "command": "mdpm.revealInExplorer",
+          "when": "viewItem",
+          "group": "9_reveal"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "mdpm.unlinkTask",
+          "when": "false"
+        },
+        {
+          "command": "mdpm.openProjectFile",
+          "when": "false"
+        },
+        {
+          "command": "mdpm.revealInExplorer",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "mdpm",
+      "properties": {
+        "mdpm.root": {
+          "type": "string",
+          "default": "",
+          "description": "Folder (relative to each workspace folder) to scan for projects. Set this when mdpm lives inside a large repo, e.g. \"tasks\"."
+        },
+        "mdpm.defaultOwner": {
+          "type": "string",
+          "default": "",
+          "description": "Owner for new tasks. Leave empty to leave tasks unassigned."
+        }
+      }
+    }
+  }
+}

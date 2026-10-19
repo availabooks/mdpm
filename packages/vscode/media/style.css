@@ -1,0 +1,244 @@
+:root {
+  --border: var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  --muted: var(--vscode-descriptionForeground);
+  --surface: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  --card: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  --weekend: rgba(128, 128, 128, 0.07);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+body { display: flex; flex-direction: column; overflow: hidden; }
+#app { flex: 1; min-height: 0; overflow: auto; }
+
+code { font-family: var(--vscode-editor-font-family); }
+.muted { color: var(--muted); font-size: 0.9em; }
+.empty { padding: 32px; color: var(--muted); text-align: center; }
+
+/* Toolbar */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.toolbar label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.toolbar .spacer { flex: 1; }
+select, input[type='search'] {
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: 2px;
+  padding: 3px 6px;
+  font: inherit;
+}
+input[type='search'] { width: 180px; }
+button {
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+  border: none;
+  border-radius: 2px;
+  padding: 4px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+#b-new { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+#b-new:hover { background: var(--vscode-button-hoverBackground); }
+.seg { display: inline-flex; }
+.seg button { border-radius: 0; }
+.seg button:first-child { border-radius: 2px 0 0 2px; }
+.seg button:last-child { border-radius: 0 2px 2px 0; }
+.seg button.active { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+
+/* Kanban */
+.board {
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  height: 100%;
+  align-items: stretch;
+}
+.column {
+  flex: 1 0 240px;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-height: 0;
+}
+.column.over { outline: 2px dashed var(--vscode-focusBorder); outline-offset: -2px; }
+.column header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+.column .count {
+  color: var(--muted);
+  font-weight: normal;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  border-radius: 10px;
+  padding: 0 7px;
+}
+.column .col-add { margin-left: auto; background: transparent; color: var(--muted); padding: 0 6px; }
+.column .col-add:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+.cards { flex: 1; overflow-y: auto; padding: 4px 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.card:hover { border-color: var(--vscode-focusBorder); border-left-color: var(--accent); }
+.card.dragging { opacity: 0.4; }
+.card-title { font-weight: 600; margin-bottom: 6px; line-height: 1.3; }
+.card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.85em; color: var(--muted); }
+.card-meta .id { font-family: var(--vscode-editor-font-family); opacity: 0.8; }
+.card-meta .owner {
+  margin-left: auto;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  border-radius: 10px;
+  padding: 0 7px;
+}
+.badge.prio { border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
+.due.overdue { color: var(--vscode-errorForeground); font-weight: 600; }
+.tags { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+.tag {
+  font-size: 0.8em;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.15));
+  color: var(--vscode-textLink-foreground);
+}
+.card-project { margin-top: 6px; font-size: 0.8em; color: var(--muted); }
+
+/* Waterfall */
+.wf-scroll { height: 100%; overflow: auto; }
+.wf-inner { position: relative; min-height: 100%; }
+.wf-header { position: sticky; top: 0; z-index: 4; display: flex; background: var(--vscode-editor-background); border-bottom: 1px solid var(--border); }
+.wf-corner {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  width: var(--label);
+  flex: none;
+  padding: 0 10px;
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 6px;
+  color: var(--muted);
+  background: var(--vscode-editor-background);
+  border-right: 1px solid var(--border);
+}
+.wf-scale { position: relative; height: 44px; flex: none; }
+.months, .ticks { position: absolute; left: 0; right: 0; height: 22px; }
+.months { top: 0; }
+.ticks { top: 22px; }
+.month, .tick {
+  position: absolute;
+  top: 0;
+  height: 22px;
+  line-height: 22px;
+  padding-left: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+  font-size: 0.85em;
+}
+.month { font-weight: 600; }
+.tick { color: var(--muted); }
+.tick.now { color: var(--vscode-charts-red); font-weight: 600; }
+
+.wf-body { position: relative; }
+.wf-row { display: flex; height: var(--row); }
+.wf-label {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  width: var(--label);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  background: var(--vscode-editor-background);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid rgba(128, 128, 128, 0.08);
+}
+.wf-label .title { overflow: hidden; text-overflow: ellipsis; }
+.wf-label .title.done { text-decoration: line-through; color: var(--muted); }
+.wf-label[data-key] { cursor: pointer; }
+.wf-label[data-key]:hover .title { text-decoration: underline; }
+.wf-row.group .wf-label { font-weight: 600; background: var(--surface); }
+.wf-row.group .wf-track { background: var(--surface); }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.wf-track { position: relative; flex: none; border-bottom: 1px solid rgba(128, 128, 128, 0.08); }
+.wf-track.unscheduled { cursor: copy; }
+.wf-track.unscheduled:hover { background-color: var(--vscode-list-hoverBackground); }
+
+.bar {
+  position: absolute;
+  top: 5px;
+  height: calc(var(--row) - 10px);
+  min-width: 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  border: 1px solid var(--accent);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  cursor: grab;
+  font-size: 0.85em;
+  user-select: none;
+  z-index: 2;
+}
+.bar span { flex: 1; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.bar.done { opacity: 0.6; }
+.bar.late { box-shadow: inset 0 0 0 1px var(--vscode-errorForeground); }
+.bar.dragging { cursor: grabbing; overflow: visible; }
+.bar.dragging::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: -22px;
+  left: 0;
+  padding: 1px 6px;
+  white-space: nowrap;
+  border-radius: 3px;
+  background: var(--vscode-editorHoverWidget-background);
+  border: 1px solid var(--vscode-editorHoverWidget-border);
+}
+.h { width: 6px; align-self: stretch; cursor: ew-resize; flex: none; }
+.h:hover { background: var(--accent); }
+
+.wf-overlay { position: absolute; top: 0; pointer-events: none; z-index: 2; overflow: visible; }
+.wf-overlay .today { stroke: var(--vscode-charts-red); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.wf-overlay .dep { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+.wf-overlay .dep.bad { stroke: var(--vscode-errorForeground); }
+.wf-overlay .arrowhead { fill: var(--muted); }
+.wf-overlay .arrowhead.bad { fill: var(--vscode-errorForeground); }

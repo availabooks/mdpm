@@ -1,0 +1,28 @@
+{
+  "name": "@mdpm/cli",
+  "version": "0.1.0",
+  "description": "Command line interface for mdpm markdown task workspaces",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/availabooks/mdpm.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/availabooks/mdpm#readme",
+  "bugs": {
+    "url": "https://github.com/availabooks/mdpm/issues"
+  },
+  "bin": {
+    "mdpm": "dist/mdpm.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node18 --format=cjs --outfile=dist/mdpm.js --banner:js=\"#!/usr/bin/env node\""
+  },
+  "dependencies": {
+    "@mdpm/core": "*",
+    "commander": "^12.1.0"
+  }
+}
