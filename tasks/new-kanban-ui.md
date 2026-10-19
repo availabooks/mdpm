@@ -1,12 +1,13 @@
 ---
 title: New Kanban UI
-status: review
+status: done
 author: Elijah Allen
 created: 2026-10-19
 owner: claude
 start: 2026-10-19
 branch: agent/new-kanban-ui
 pr: https://github.com/availabooks/mdpm/pull/2
+end: 2026-10-19
 ---
 
 # New Kanban UI

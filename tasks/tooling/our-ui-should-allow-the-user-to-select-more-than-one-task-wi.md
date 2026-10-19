@@ -1,12 +1,13 @@
 ---
 title: our UI should allow the user to select more than one task with ctrl/cmd click
-status: todo
+status: done
 author: Elijah Allen
 created: 2026-10-19
 owner: claude
 start: 2026-10-19
 branch: agent/our-ui-should-allow-the-user-to-select-more-than-one-task-wi
 pr: https://github.com/availabooks/mdpm/pull/1
+end: 2026-10-19
 ---
 
 # our UI should allow the user to select more than one task with ctrl/cmd click
