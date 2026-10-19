@@ -1,4 +1,5 @@
 import {
+  Issue,
   Project,
   Task,
   Workspace,
@@ -10,6 +11,10 @@ import {
   findTask,
   linkTask,
   loadWorkspace,
+  newTaskMeta,
+  nextTaskPath,
+  previewNewTask,
+  previewTaskChange,
   projectSubtree,
   suggest,
   tasksInProject,
@@ -54,6 +59,27 @@ async function load(): Promise<Workspace> {
 function fail(msg: string): never {
   console.error(red(`error: ${msg}`));
   process.exit(1);
+}
+
+/**
+ * Prints the problems a pending write would cause. Errors stop the write (exit code 1, nothing
+ * changed) unless --force is given; warnings are printed and the write goes ahead.
+ */
+function guard(ws: Workspace, issues: Issue[], force: boolean | undefined) {
+  for (const i of issues.filter((i) => i.level === 'warning')) console.warn(yellow(`warning [${i.code}]: ${i.message}`));
+  const errors = issues.filter((i) => i.level === 'error');
+  if (!errors.length) return;
+  for (const i of errors) console.error(red(`error [${i.code}]: ${i.message}`));
+  if (force) {
+    console.warn(yellow('--force given, so writing anyway. Run "mdpm check" to see the remaining problems.'));
+    return;
+  }
+  fail(`Nothing was changed. Fix the value${errors.length > 1 ? 's' : ''} above and try again, or add --force to write anyway.`);
+}
+
+function formatIssue(ws: Workspace, i: Issue): string {
+  const where = `${rel(ws, i.file)}${i.line ? `:${i.line}` : ''}`;
+  return `${i.level === 'error' ? red('error') : yellow('warn ')}  ${where}  ${dim(`[${i.code}]`)}\n       ${i.message.replace(/\n/g, '\n       ')}`;
 }
 
 function alreadyProject(dir: string): string {
@@ -227,35 +253,26 @@ program
   .option('-t, --tags <list>', 'comma separated')
   .option('--depends <ids>', 'comma separated task ids')
   .option('--json', 'print the created task as JSON')
+  .option('--force', 'create the task even if it fails validation')
   .action(async (words: string[], o: Record<string, string | boolean | undefined>) => {
     const ws = await load();
     const project = o.project ? getProject(ws, o.project as string) : currentProject(ws);
-    const status = (o.status as string) ?? project.statuses[0];
-    if (!project.statuses.includes(status)) {
-      console.warn(
-        yellow(
-          `warning: "${status}" is not a status of ${project.name} (${project.statuses.join(', ')}). The task is created anyway; ` +
-            `fix it with "mdpm move <id> <status>", or add "${status}" to "statuses" in ${rel(ws, project.file)}.`,
-        ),
-      );
-    }
     const list = (v: unknown) => (typeof v === 'string' ? v.split(',').map((s) => s.trim()).filter(Boolean) : undefined);
     const priority = o.priority === undefined ? undefined : parseYaml(o.priority as string);
-    const file = await createTask(
-      project.dir,
-      {
-        title: words.join(' '),
-        status,
-        owner: o.owner as string | undefined,
-        author: (o.author as string) ?? defaultAuthor(),
-        start: o.start as string | undefined,
-        end: o.end as string | undefined,
-        priority,
-        tags: list(o.tags),
-        dependsOn: list(o.depends),
-      },
-      project.taskExtension,
-    );
+    const task = {
+      title: words.join(' '),
+      status: (o.status as string) ?? project.statuses[0],
+      owner: o.owner as string | undefined,
+      author: (o.author as string) ?? defaultAuthor(),
+      start: o.start as string | undefined,
+      end: o.end as string | undefined,
+      priority,
+      tags: list(o.tags),
+      dependsOn: list(o.depends),
+    };
+    const target = nextTaskPath(project.dir, task.title, project.taskExtension);
+    guard(ws, previewNewTask(ws, project, target, newTaskMeta(task)), o.force as boolean | undefined);
+    const file = await createTask(project.dir, task, project.taskExtension);
     if (o.json) {
       const fresh = await loadWorkspace(ws.root);
       return console.log(JSON.stringify(taskJson(fresh, findTask(fresh, file)!), null, 2));
@@ -297,25 +314,24 @@ program
 program
   .command('set <task> <assignments...>')
   .description('set front matter fields, e.g. mdpm set login status=done owner=eli tags=ui,auth (empty value deletes)')
-  .action(async (ref: string, pairs: string[]) => {
+  .option('--force', 'write even if the result fails validation')
+  .action(async (ref: string, pairs: string[], o: { force?: boolean }) => {
     const ws = await load();
     const t = getTask(ws, ref);
-    await updateTask(t.file, parseAssignments(pairs));
+    const changes = parseAssignments(pairs);
+    guard(ws, previewTaskChange(ws, t, changes), o.force);
+    await updateTask(t.file, changes);
     console.log(`Updated ${rel(ws, t.file)}`);
   });
 
 program
   .command('move <task> <status>')
-  .description('change the status of a task')
-  .action(async (ref: string, status: string) => {
+  .description('change the status of a task (validated against the project\'s statuses and rules)')
+  .option('--force', 'write even if the result fails validation')
+  .action(async (ref: string, status: string, o: { force?: boolean }) => {
     const ws = await load();
     const t = getTask(ws, ref);
-    if (!t.home.statuses.includes(status)) {
-      fail(
-        `"${status}" is not a status of project "${t.home.name}". Use one of: ${t.home.statuses.join(', ')}; ` +
-          `or add it to "statuses" in ${rel(ws, t.home.file)}, or use "mdpm set ${t.id} status=${status}" to force it.`,
-      );
-    }
+    guard(ws, previewTaskChange(ws, t, { status }), o.force);
     await updateTask(t.file, { status });
     console.log(`${t.id}: ${t.status} → ${status}`);
   });
@@ -372,16 +388,26 @@ program
 
 program
   .command('check')
-  .description('validate projects and tasks; exits 1 on errors')
+  .description('validate all .proj settings and task front matter; exits 1 on errors (and on warnings with --strict)')
+  .option('--strict', 'treat warnings as errors (recommended for CI and agent runs)')
   .option('--json', 'machine readable output')
-  .action(async (o: { json?: boolean }) => {
+  .action(async (o: { json?: boolean; strict?: boolean }) => {
     const ws = await load();
-    if (o.json) console.log(JSON.stringify(ws.issues.map((i) => ({ ...i, file: rel(ws, i.file) })), null, 2));
-    else {
-      for (const i of ws.issues) console.log(`${i.level === 'error' ? red('error') : yellow('warn ')}  ${rel(ws, i.file)}: ${i.message}`);
-      console.log(dim(`${ws.projects.length} projects, ${ws.tasks.length} tasks, ${ws.issues.length} issues`));
+    const errors = ws.issues.filter((i) => i.level === 'error').length;
+    const warnings = ws.issues.length - errors;
+    const failed = errors > 0 || (!!o.strict && warnings > 0);
+    if (o.json) {
+      const issues = ws.issues.map((i) => ({ ...i, file: rel(ws, i.file) }));
+      console.log(JSON.stringify({ ok: !failed, errors, warnings, projects: ws.projects.length, tasks: ws.tasks.length, issues }, null, 2));
+    } else {
+      const sorted = [...ws.issues].sort((a, b) => a.file.localeCompare(b.file) || (a.line ?? 0) - (b.line ?? 0));
+      for (const i of sorted) console.log(formatIssue(ws, i));
+      const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
+      const summary = `${n(ws.projects.length, 'project')}, ${n(ws.tasks.length, 'task')}: ${n(errors, 'error')}, ${n(warnings, 'warning')}`;
+      console.log(failed ? red(summary) : dim(summary));
+      if (!o.strict && warnings && !errors) console.log(dim('Warnings do not fail the check; use --strict to make them fail too.'));
     }
-    if (ws.issues.some((i) => i.level === 'error')) process.exitCode = 1;
+    if (failed) process.exitCode = 1;
   });
 
 program

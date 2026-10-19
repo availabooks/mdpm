@@ -34,10 +34,15 @@ owner: eli
 statuses: [backlog, todo, in-progress, review, done]   # Kanban columns, in order
 taskExtension: .md        # or .task — extension for new tasks
 ignore: [assets]          # folder names to skip while scanning
+required: [owner]         # fields every task must have
+requiredByStatus:         # extra fields a task needs before it may enter a status
+  in-progress: [owner, start]
+  done: [end]
 # any other keys are kept and passed through
 ```
 
-`statuses` and `taskExtension` are inherited by sub projects that don't set their own. The
+`statuses`, `taskExtension`, `required` and `requiredByStatus` are inherited by sub projects
+that don't set their own. The
 default statuses are `backlog, todo, in-progress, review, done`. The **last** status is
 treated as "done" (for overdue highlighting and the waterfall view).
 
@@ -111,13 +116,63 @@ mdpm link oauth-login mobile            # share a task with another project
 mdpm unlink oauth-login mobile
 mdpm board -p website                   # text kanban
 mdpm projects
-mdpm check                              # validate (exit code 1 on errors) — good for CI
+mdpm check                              # validate everything (exit code 1 on errors)
+mdpm check --strict --json              # warnings fail too; machine-readable report
 ```
+
+`new`, `set` and `move` validate the result **before** writing. If the change would break a
+rule, nothing is written, the problems are printed with their rule codes, and the exit code is 1.
+Add `--force` to write anyway.
 
 The root is found automatically: `--root`, else `$MDPM_ROOT`, else the enclosing git repo,
 else the topmost folder with a `.proj`. Projects are referenced by folder path relative to
 the root (`tasks/website`) or by unique name (`website`). `list`, `show`, `projects`, `new`
 and `check` accept `--json`.
+
+## Validation
+
+Because agents (and people) edit tasks unattended, mdpm checks every `.proj` and every
+task's front matter. Problems come with a stable **rule code**, the **line** they're on, and
+a message that says how to fix them. You'll see them in:
+
+- `mdpm check`, for CI and agents. `--strict` makes warnings fail too, and `--json` prints a report with `ok`, counts and each issue's `code`, `file`, `line`, `field` and `message`.
+- every write: `mdpm new/set/move` and the VS Code board, tree and waterfall refuse changes that would introduce an error (VS Code offers *Save Anyway*). Problems the task already had never block an unrelated change.
+- the VS Code Problems panel, underlined on the offending line.
+
+| Code | Level | Meaning |
+|------|-------|---------|
+| `proj/yaml-invalid` | error | `.proj` isn't valid YAML, or isn't `key: value` lines |
+| `proj/field-type` | error | a setting has the wrong type (e.g. `statuses: todo` instead of a list) |
+| `proj/field-value` | error/warn | `taskExtension` isn't `.md`/`.task`; `ignore` contains paths or globs |
+| `proj/statuses-empty` | error | `statuses: []` |
+| `proj/statuses-duplicate` | error | a status is listed twice |
+| `proj/required-unknown-status` | error | `requiredByStatus` names a status the project doesn't have |
+| `proj/unknown-field` | error/warn | likely typo of a setting (error if the intended setting is therefore missing) |
+| `task/yaml-invalid` | error | front matter isn't valid YAML, or isn't `key: value` lines |
+| `task/field-type` | error | e.g. `status: [todo]`, `tags: {a: 1}` |
+| `task/status-unknown` | error | `status` isn't one of the project's `statuses` |
+| `task/date-invalid` | error | `created`/`start`/`end` isn't a real `YYYY-MM-DD` date |
+| `task/date-order` | error | `end` is before `start` |
+| `task/required-missing` | error | a field required by `required` / `requiredByStatus` is missing |
+| `task/duplicate-id` | error | two tasks share an id |
+| `task/dependency-unknown` | error | `depends_on` names a task that doesn't exist |
+| `task/dependency-self` | error | a task depends on itself |
+| `task/dependency-cycle` | error | `depends_on` forms a loop |
+| `task/dependency-open` | warning | a task is done but one of its dependencies isn't |
+| `task/unknown-field` | error/warn | likely typo of a field, e.g. `stauts` (error if `status` is therefore missing) |
+| `link/broken` | error | a symlink points at a file that doesn't exist |
+| `link/not-task` | warning | a link points at a markdown file without front matter |
+| `fs/read-error` | error | a file or folder couldn't be read |
+
+Custom fields (`estimate:`, `team:`, …) are allowed; only names that look like typos of
+known ones are flagged.
+
+To stop invalid tasks from ever being committed, run the check in CI (see
+`.github/workflows/ci.yml`) or as a git pre-commit hook:
+
+```bash
+printf '#!/bin/sh\nnpx mdpm check --strict\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+```
 
 ## VS Code extension
 
@@ -135,7 +190,7 @@ Or open this repo in VS Code and press F5 (*Run Extension*) for a development ho
 - **Waterfall**: Gantt timeline from `start`/`end`, grouped by project, with dependency
   arrows (red when a task starts before its dependency ends). Drag a bar to move it, drag
   its edges to change start/end, click an unscheduled row to schedule it. Day/week/month zoom.
-- Validation problems (duplicate ids, unknown dependencies, bad dates…) show in the
+- Validation problems (see [Validation](#validation)) show in the
   Problems panel. `.task` files open as markdown, `.proj` as YAML.
 - Settings: `mdpm.root` (subfolder to scan in large repos), `mdpm.defaultOwner`.
 

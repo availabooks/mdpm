@@ -7,3 +7,8 @@ statuses:
   - in-progress
   - review
   - done
+# Agents and humans must leave tasks in a valid state; `mdpm check --strict` enforces this in CI.
+requiredByStatus:
+  in-progress: [owner, start]
+  review: [owner]
+  done: [end]

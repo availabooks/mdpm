@@ -10,7 +10,10 @@ export interface FrontMatterSplit {
 export interface ParsedFrontMatter {
   data: Record<string, unknown>;
   body: string;
+  /** 1-based line of each top-level key in the original file. */
+  lines: Record<string, number>;
   error?: string;
+  errorLine?: number;
 }
 
 const LINE = /([^\r\n]*)(\r\n|\n|$)/y;
@@ -39,11 +42,38 @@ export function splitFrontMatter(text: string): FrontMatterSplit | null {
 export function parseFrontMatter(text: string): ParsedFrontMatter | null {
   const split = splitFrontMatter(text);
   if (!split) return null;
-  const doc = parseDocument(split.yaml);
-  if (doc.errors.length) return { data: {}, body: split.body, error: doc.errors[0].message };
+  // Line 1 is the opening fence, so YAML starts on line 2.
+  const parsed = parseYamlMapping(split.yaml, 2);
+  return { ...parsed, body: split.body };
+}
+
+/** Parses YAML that must be a `key: value` mapping, reporting errors instead of throwing. */
+export function parseYamlMapping(
+  yaml: string,
+  firstLine: number,
+): { data: Record<string, unknown>; lines: Record<string, number>; error?: string; errorLine?: number } {
+  const lines = keyLines(yaml, firstLine);
+  const doc = parseDocument(yaml);
+  if (doc.errors.length) {
+    const pos = doc.errors[0].linePos?.[0];
+    return { data: {}, lines, error: doc.errors[0].message.split('\n')[0], errorLine: pos ? pos.line + firstLine - 1 : undefined };
+  }
   const js = doc.toJS();
-  const data = js && typeof js === 'object' && !Array.isArray(js) ? (js as Record<string, unknown>) : {};
-  return { data, body: split.body };
+  if (js == null) return { data: {}, lines };
+  if (typeof js !== 'object' || Array.isArray(js)) {
+    return { data: {}, lines, error: 'expected "key: value" lines (a YAML mapping), but found a list or a single value', errorLine: firstLine };
+  }
+  return { data: js as Record<string, unknown>, lines };
+}
+
+/** Maps each top-level key to the 1-based line it is on. */
+export function keyLines(yaml: string, firstLine: number): Record<string, number> {
+  const out: Record<string, number> = {};
+  yaml.split(/\r?\n/).forEach((line, i) => {
+    const m = /^([^\s#:'"\-][^:]*?)\s*:(\s|$)/.exec(line);
+    if (m && !(m[1] in out)) out[m[1]] = firstLine + i;
+  });
+  return out;
 }
 
 /**

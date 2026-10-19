@@ -1,4 +1,4 @@
-import { Project, Task, createProject, createTask, defaultAuthor, linkTask, slugify, unlinkTask, updateTask } from '@mdpm/core';
+import { Project, Task, createProject, createTask, defaultAuthor, linkTask, newTaskMeta, nextTaskPath, previewNewTask, slugify, unlinkTask } from '@mdpm/core';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Model } from './model';
@@ -74,7 +74,20 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!title?.trim()) return;
       const status = arg && 'status' in arg && arg.status ? arg.status : project.statuses[0];
       const owner = vscode.workspace.getConfiguration('mdpm').get<string>('defaultOwner') || undefined;
-      const file = await createTask(project.dir, { title: title.trim(), status, owner, author: defaultAuthor(project.dir) }, project.taskExtension);
+      const task = { title: title.trim(), status, owner, author: defaultAuthor(project.dir) };
+      const ws = model.workspaces.find((w) => w.projects.includes(project));
+      const errors = ws
+        ? previewNewTask(ws, project, nextTaskPath(project.dir, task.title, project.taskExtension), newTaskMeta(task)).filter((i) => i.level === 'error')
+        : [];
+      if (errors.length) {
+        const choice = await vscode.window.showErrorMessage(
+          `mdpm: a task "${task.title}" in ${project.name} would be invalid, so it was not created.`,
+          { modal: true, detail: errors.map((i) => `• ${i.message}`).join('\n') + '\n\nYou can create it anyway and fix the front matter afterwards.' },
+          'Create Anyway',
+        );
+        if (choice !== 'Create Anyway') return;
+      }
+      const file = await createTask(project.dir, task, project.taskExtension);
       await model.reload();
       await vscode.window.showTextDocument(vscode.Uri.file(file));
     },
@@ -126,8 +139,7 @@ export async function activate(context: vscode.ExtensionContext) {
         { placeHolder: `Status for "${task.title}"` },
       );
       if (!status || status.label === task.status) return;
-      await updateTask(task.file, { status: status.label });
-      await model.reload();
+      await model.update(task, { status: status.label });
     },
 
     'mdpm.setOwner': async (arg) => {
@@ -135,8 +147,7 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!task) return;
       const owner = await vscode.window.showInputBox({ prompt: `Owner of "${task.title}" (empty to unassign)`, value: task.owner ?? '' });
       if (owner === undefined) return;
-      await updateTask(task.file, { owner: owner.trim() || null });
-      await model.reload();
+      await model.update(task, { owner: owner.trim() || null });
     },
 
     'mdpm.linkTask': async (arg) => {

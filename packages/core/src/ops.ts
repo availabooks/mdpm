@@ -4,7 +4,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { stringify } from 'yaml';
 import { serializeFrontMatter, splitFrontMatter, updateFrontMatter } from './frontmatter';
-import { isTaskFile, toPosix } from './workspace';
+import { toPosix } from './build';
+import { isTaskFile } from './workspace';
 import { LinkKind, PROJECT_FILE, ProjectMeta, TaskExtension } from './types';
 
 export interface NewTask {
@@ -35,8 +36,8 @@ export async function updateTask(file: string, changes: Record<string, unknown>)
   await fs.writeFile(file, updated, 'utf8');
 }
 
-/** Creates a new task file in `dir` and returns its path. Never overwrites an existing file. */
-export async function createTask(dir: string, task: NewTask, extension: TaskExtension = '.md'): Promise<string> {
+/** The front matter a new task gets. Exposed so callers can validate it before writing. */
+export function newTaskMeta(task: NewTask): Record<string, unknown> {
   const data: Record<string, unknown> = {
     title: task.title,
     status: task.status,
@@ -50,17 +51,32 @@ export async function createTask(dir: string, task: NewTask, extension: TaskExte
     depends_on: task.dependsOn,
     ...task.extra,
   };
-  const body = task.body ?? `\n# ${task.title}\n\n## Description\n\n\n## Acceptance criteria\n\n- [ ] \n`;
-  const content = serializeFrontMatter(data, body);
+  return Object.fromEntries(
+    Object.entries(data).filter(([, v]) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)),
+  );
+}
 
-  await fs.mkdir(dir, { recursive: true });
-  const base = slugify(task.title) || 'task';
+/** The path `createTask` will use for `title` in `dir` (first free `slug`, `slug-2`, …). */
+export function nextTaskPath(dir: string, title: string, extension: TaskExtension = '.md'): string {
+  const base = slugify(title) || 'task';
   for (let n = 1; ; n++) {
     const file = path.join(dir, `${base}${n > 1 ? `-${n}` : ''}${extension}`);
+    if (!existsSync(file)) return file;
+  }
+}
+
+/** Creates a new task file in `dir` and returns its path. Never overwrites an existing file. */
+export async function createTask(dir: string, task: NewTask, extension: TaskExtension = '.md'): Promise<string> {
+  const body = task.body ?? `\n# ${task.title}\n\n## Description\n\n\n## Acceptance criteria\n\n- [ ] \n`;
+  const content = serializeFrontMatter(newTaskMeta(task), body);
+  await fs.mkdir(dir, { recursive: true });
+  for (;;) {
+    const file = nextTaskPath(dir, task.title, extension);
     try {
       await fs.writeFile(file, content, { encoding: 'utf8', flag: 'wx' });
       return file;
     } catch (e) {
+      // Lost a race with another writer; pick the next free name.
       if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
     }
   }

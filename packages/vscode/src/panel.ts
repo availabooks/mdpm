@@ -1,4 +1,3 @@
-import { updateTask } from '@mdpm/core';
 import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import { Model } from './model';
@@ -67,12 +66,10 @@ export class ViewPanel {
           await vscode.window.showTextDocument(vscode.Uri.file(m.file), { viewColumn: vscode.ViewColumn.Beside, preview: true });
           break;
         case 'setStatus':
-          await updateTask(m.file, { status: m.status });
-          await this.model.reload();
+          await this.model.update(this.task(m.file), { status: m.status });
           break;
         case 'setDates':
-          await updateTask(m.file, { start: m.start, end: m.end });
-          await this.model.reload();
+          await this.model.update(this.task(m.file), { start: m.start, end: m.end });
           break;
         case 'newTask':
           await vscode.commands.executeCommand('mdpm.newTask', { projectKey: m.project, status: m.status });
@@ -84,6 +81,12 @@ export class ViewPanel {
       );
       this.post(); // revert optimistic UI changes
     }
+  }
+
+  private task(file: string) {
+    const task = this.model.task(file);
+    if (!task) throw new Error(`${file} is no longer a task (it may have been moved or deleted). Run "mdpm: Refresh" and try again.`);
+    return task;
   }
 
   private html(media: vscode.Uri): string {

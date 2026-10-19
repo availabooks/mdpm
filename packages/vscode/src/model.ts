@@ -1,4 +1,4 @@
-import { Project, Task, Workspace, loadWorkspace, toPosix } from '@mdpm/core';
+import { Issue, Project, Task, Workspace, loadWorkspace, previewTaskChange, toPosix, updateTask } from '@mdpm/core';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -35,6 +35,10 @@ export interface ModelDTO {
   tasks: TaskDTO[];
   statuses: string[];
   owners: string[];
+}
+
+function describe(issues: Issue[]): string {
+  return issues.map((i) => `• ${i.message}`).join('\n');
 }
 
 export class Model implements vscode.Disposable {
@@ -110,15 +114,43 @@ export class Model implements vscode.Disposable {
     this.diagnostics.clear();
     const byFile = new Map<string, vscode.Diagnostic[]>();
     for (const issue of this.workspaces.flatMap((w) => w.issues)) {
+      const line = Math.max(0, (issue.line ?? 1) - 1);
       const d = new vscode.Diagnostic(
-        new vscode.Range(0, 0, 0, 3),
+        new vscode.Range(line, 0, line, Number.MAX_SAFE_INTEGER),
         issue.message,
         issue.level === 'error' ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning,
       );
       d.source = 'mdpm';
+      d.code = issue.code;
       byFile.set(issue.file, [...(byFile.get(issue.file) ?? []), d]);
     }
     for (const [file, list] of byFile) this.diagnostics.set(vscode.Uri.file(file), list);
+  }
+
+  /**
+   * Writes front matter changes after validating them. Errors ask for confirmation
+   * ("Save Anyway"); warnings are shown after saving. Returns whether the file was written.
+   */
+  async update(task: Task, changes: Record<string, unknown>): Promise<boolean> {
+    const ws = this.workspaces.find((w) => w.tasks.includes(task));
+    const issues = ws ? previewTaskChange(ws, task, changes) : [];
+    const errors = issues.filter((i) => i.level === 'error');
+    if (errors.length) {
+      const choice = await vscode.window.showErrorMessage(
+        `mdpm: this change would make "${task.title}" invalid, so it was not saved.`,
+        { modal: true, detail: describe(errors) },
+        'Save Anyway',
+      );
+      if (choice !== 'Save Anyway') {
+        this.changed.fire(); // let views drop their optimistic update
+        return false;
+      }
+    }
+    await updateTask(task.file, changes);
+    await this.reload();
+    const warnings = issues.filter((i) => i.level === 'warning');
+    if (warnings.length) vscode.window.showWarningMessage(`mdpm: saved "${task.title}", with warnings: ${describe(warnings)}`);
+    return true;
   }
 
   project(key: string): Project | undefined {
