@@ -310,6 +310,12 @@ Settled during implementation (2026-10-19):
   path (after a handoff removed it) can still reopen them; verified with `claude -p --resume <id>`
   and `--continue` against a removed and recreated worktree. It uses `--continue` rather than the
   run record's session id so that directions given in an earlier interactive session are kept too.
+- **Showing activity.** A task's status says where it is in the lifecycle, not whether an agent is
+  working on it right now (a refine run deliberately keeps `todo`). So the runner and interactive
+  sessions write `.mdpm/active/<task>.json` (agent, mode, pid, started, heartbeat every 10 s) and
+  remove it on exit or INT/TERM/HUP. Readers ignore markers whose pid is gone or whose heartbeat is
+  over a minute old, so a killed run clears itself. Views reload only when who-is-working changes,
+  not on every heartbeat. The marker doubles as the lock that stops two runs on one task.
 - **Verified `claude -p` flags** (Claude Code 2.1.303): `--permission-prompts none`,
   `--permission-mode acceptEdits`, `--max-turns`, `--add-dir`, `--allowedTools`,
   `--output-format json` (gives `session_id`, `total_cost_usd`, `subtype`/`terminal_reason`).

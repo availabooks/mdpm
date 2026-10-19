@@ -3,6 +3,7 @@ import { existsSync, promises as fs } from 'fs';
 import * as path from 'path';
 import { AgentDefinition, AgentPick, agentDefinitions, agentQueue, expandArgs, lastEntryIsClaim, modeFor, planClaim, writeBack } from './agent';
 import { agentLog, readiness } from './body';
+import { activityVerb, ago, markActive, readActive } from './activity';
 import { buildContinuePrompt, buildPrompt } from './instructions';
 import { applyStatusDefaults, slugify } from './ops';
 import { AgentMode, BLOCKED_STATUS, Task, Workspace } from './types';
@@ -63,6 +64,11 @@ export interface RunSummary {
 }
 
 export class RunnerError extends Error {}
+
+/** Message for a task an agent is already working on (it would otherwise be started twice in one worktree). */
+function busyMessage(r: { agent: string; mode: Parameters<typeof activityVerb>[0]; started: string; pid: number }, task: string): string {
+  return `${r.agent} is already ${activityVerb(r.mode)} "${task}" (started ${ago(r.started)} ago, pid ${r.pid}). Wait for it to finish, or stop that process first; a run that died is ignored after a minute.`;
+}
 
 /** The question a refined task is blocked on, so the person reviews it before an agent implements it. */
 export const REVIEW_REFINEMENT = 'Review the refined description and acceptance criteria. Edit anything that is off, answer any other questions here, then Unblock (or move it to todo) to have it implemented.';
@@ -402,6 +408,7 @@ export async function runAgents(opts: RunOptions): Promise<RunSummary> {
   const maxTasks = opts.task ? 1 : Math.max(1, opts.maxTasks ?? 1);
   const tried = new Set<string>();
   const records: RunRecord[] = [];
+  const busy = async () => new Map((await readActive(dir)).map((r) => [r.task, r]));
 
   for (let n = 0; n < maxTasks; n++) {
     if (n > 0) ws = await loadWorkspace(ws.root);
@@ -409,12 +416,15 @@ export async function runAgents(opts: RunOptions): Promise<RunSummary> {
     if (opts.task) {
       const task = findTask(ws, opts.task);
       if (!task) throw new RunnerError(`No task with id or path "${opts.task}". Run "mdpm list" to see task ids.`);
+      const running = (await busy()).get(task.id);
+      if (running) throw new RunnerError(busyMessage(running, task.id));
       const mode = modeFor(task);
       if (!mode) throw new RunnerError(`"${task.id}" is "${task.status}"; agents only work on backlog, todo and in-progress tasks.${task.status === 'blocked' ? ' Answer its questions and move it back to todo first.' : ''}`);
       if (!task.home.agent.modes.includes(mode)) throw new RunnerError(`"${task.id}" needs "${mode}" mode, which project "${task.home.name}" doesn't allow (agent.modes in its .proj).`);
       pick = { task, mode, assigned: task.owner === agentName, readiness: readiness(task.body) };
     } else {
-      pick = agentQueue(ws, agentName, { exclude: tried }).picks[0];
+      // Tasks another runner is working on are skipped, so two runners never start the same task.
+      pick = agentQueue(ws, agentName, { exclude: new Set([...tried, ...(await busy()).keys()]) }).picks[0];
       if (!pick) return { records, stopped: n === 0 ? describeSkips(ws, agentName) : `No more tasks for ${agentName}.` };
     }
     const { task, mode } = pick;
@@ -454,6 +464,7 @@ export async function runAgents(opts: RunOptions): Promise<RunSummary> {
 
     const started = new Date();
     let result: AgentResult;
+    const live = await markActive(dir, { task: task.id, agent: agentName, mode, run: id });
     try {
       ensureWorktree(repo, worktree, branch);
       await fs.writeFile(promptFile, prompt);
@@ -474,6 +485,8 @@ export async function runAgents(opts: RunOptions): Promise<RunSummary> {
     } catch (e) {
       await writeBack(task.file, { changes: {}, log: `run ${id} failed to start: ${(e as Error).message}`, by: 'mdpm' });
       throw e;
+    } finally {
+      live.stop();
     }
     const ended = new Date();
 
@@ -586,6 +599,8 @@ export interface ContinuePlan {
   env: NodeJS.ProcessEnv;
   /** True when the agent's earlier conversation is reopened; false for a new one that starts from the task. */
   reopened: boolean;
+  /** The runner state folder (`.mdpm`), where the session is marked as active. */
+  stateDir: string;
   /** The worktree was missing (removed after handoff) and has been recreated on the task's branch. */
   recreated: boolean;
 }
@@ -605,6 +620,8 @@ export async function planContinue(opts: ContinueOptions): Promise<ContinuePlan>
   if (!repo) throw new RunnerError(`${ws.root} is not in a git repository, so there is no branch or worktree to continue in. Run "git init" and make a first commit.`);
   const dir = await stateDir(repo);
 
+  const running = (await readActive(dir)).find((r) => r.task === task.id);
+  if (running) throw new RunnerError(busyMessage(running, task.id));
   const previous = await lastRun(dir, task.id, opts.agent);
   const agentName = opts.agent ?? previous?.agent ?? (task.owner && defs.agents[task.owner] ? task.owner : defs.default);
   const def = defs.agents[agentName];
@@ -643,11 +660,20 @@ export async function planContinue(opts: ContinueOptions): Promise<ContinuePlan>
     const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
     env[key] = `${await writeShims(dir, opts.cli)}${path.delimiter}${env[key] ?? ''}`;
   }
-  return { agent: agentName, task, worktree, branch, command, env, reopened, recreated };
+  return { agent: agentName, task, worktree, branch, command, env, reopened, stateDir: dir, recreated };
 }
 
 /** Runs a planned interactive session attached to this terminal and resolves with the agent's exit code. */
-export function runInteractive(plan: ContinuePlan): Promise<number | null> {
+export async function runInteractive(plan: ContinuePlan): Promise<number | null> {
+  const live = await markActive(plan.stateDir, { task: plan.task.id, agent: plan.agent, mode: 'chat', run: `chat-${process.pid}` });
+  try {
+    return await spawnInteractive(plan);
+  } finally {
+    live.stop();
+  }
+}
+
+function spawnInteractive(plan: ContinuePlan): Promise<number | null> {
   return new Promise((resolve) => {
     const r = resolveCommand(plan.command[0], plan.command.slice(1), plan.env);
     const child = spawn(r.file, r.args, { cwd: plan.worktree, env: plan.env, stdio: 'inherit', windowsVerbatimArguments: r.verbatim });

@@ -263,6 +263,16 @@ recorded in `.mdpm/runs/` (agent, task, duration, exit code, session id, cost), 
 git-ignored. Agents are started without a shell, so it works the same on Windows, macOS and
 Linux; `mdpm` is put on the agent's `PATH` for the run.
 
+**Seeing what an agent is doing.** While an agent works on a task, a marker under
+`.mdpm/active/` is refreshed every 10 seconds, and the views show it: a pulsing
+**claude implementing · 3m** badge and glow on the card (board and flow board), a spinning
+icon in the Projects tree, and **N agents working** in the status bar. Agent-owned tasks that
+are waiting for a run show a quiet **queued** badge, so a card in Todo says what is going on.
+`mdpm agent status`, `mdpm list`, `mdpm show` and `--json` output show it too. A run that
+crashes or is killed stops counting after a few seconds (its process is gone) and always after
+a minute without a heartbeat. The same marker stops a second run or chat from starting on a
+task that an agent is already working on.
+
 **Giving an agent more directions.** `mdpm agent continue <task>` (or **Continue with Agent**
 in VS Code) opens an interactive session with the agent that worked on the task. For Claude it
 reopens the latest conversation in the task's worktree (`claude --continue`), so it has the

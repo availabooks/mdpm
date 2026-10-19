@@ -1,4 +1,5 @@
 import {
+  ActiveRun,
   AgentError,
   BLOCKED_STATUS,
   DEFAULT_STATUSES,
@@ -14,6 +15,8 @@ import {
   agentGuard,
   agentInit,
   agentLog,
+  activityVerb,
+  ago,
   agentQueue,
   applyStatusDefaults,
   bodyAfter,
@@ -24,6 +27,7 @@ import {
   findRoot,
   findTask,
   isFinalStatus,
+  loadActive,
   lastEntryIsClaim,
   linkTask,
   loadWorkspace,
@@ -59,6 +63,7 @@ const color = process.stdout.isTTY && !process.env.NO_COLOR;
 const dim = (s: string) => (color ? `\x1b[2m${s}\x1b[0m` : s);
 const bold = (s: string) => (color ? `\x1b[1m${s}\x1b[0m` : s);
 const red = (s: string) => (color ? `\x1b[31m${s}\x1b[0m` : s);
+const green = (s: string) => (color ? `\x1b[32m${s}\x1b[0m` : s);
 const yellow = (s: string) => (color ? `\x1b[33m${s}\x1b[0m` : s);
 
 const program = new Command()
@@ -72,8 +77,14 @@ function root(): string {
   return opt ? path.resolve(opt) : findRoot(process.cwd());
 }
 
+/** Agents working right now, loaded with the workspace; shown next to their tasks. */
+let activeRuns: ActiveRun[] = [];
+const runningOn = (t: Task) => activeRuns.find((r) => r.task === t.id);
+const runningText = (r: ActiveRun) => `${r.agent} ${activityVerb(r.mode)} · ${ago(r.started)}`;
+
 async function load(): Promise<Workspace> {
   const ws = await loadWorkspace(root());
+  activeRuns = await loadActive(ws.root);
   if (!ws.projects.length) {
     fail(
       `No projects found under ${ws.root} (a project is a folder containing a .proj file).\n` +
@@ -197,6 +208,7 @@ function taskFields(ws: Workspace, t: Task) {
     projects: t.locations.map((l) => ({ project: l.project.id, path: rel(ws, l.path), link: l.link })),
     branch: typeof t.meta.branch === 'string' ? t.meta.branch : undefined,
     pr: typeof t.meta.pr === 'string' ? t.meta.pr : undefined,
+    running: runningOn(t) && { agent: runningOn(t)!.agent, mode: runningOn(t)!.mode, since: runningOn(t)!.started },
   };
 }
 
@@ -209,6 +221,7 @@ function taskLine(ws: Workspace, t: Task): string {
     t.start || t.end ? dim(`${t.start ?? '?'} → ${t.end ?? '?'}`) : '',
     t.tags.length ? dim(t.tags.map((x) => `#${x}`).join(' ')) : '',
     t.locations.length > 1 ? dim(`(shared: ${t.locations.map((l) => l.project.name).join(', ')})`) : '',
+    runningOn(t) ? green(`⚙ ${runningText(runningOn(t)!)}`) : '',
   ];
   return bits.filter(Boolean).join('  ');
 }
@@ -709,6 +722,21 @@ agent
       if (e instanceof RunnerError) fail(e.message);
       throw e;
     }
+  });
+
+agent
+  .command('status')
+  .description('agents working right now, and the tasks queued for them')
+  .option('--json', 'machine readable output')
+  .action(async (o: { json?: boolean }) => {
+    const ws = await load();
+    const queued = ws.tasks.filter((t) => t.owner && agentDefinitions(ws).agents[t.owner] && ['backlog', 'todo'].includes(t.status) && !runningOn(t));
+    if (o.json) {
+      return console.log(JSON.stringify({ running: activeRuns, queued: queued.map((t) => ({ id: t.id, owner: t.owner, status: t.status })) }, null, 2));
+    }
+    for (const r of activeRuns) console.log(`${green('⚙')} ${bold(r.task)}  ${runningText(r)}  ${dim(`pid ${r.pid}, run ${r.run}`)}`);
+    if (!activeRuns.length) console.log(dim('No agent is working right now.'));
+    if (queued.length) console.log(dim(`\nQueued: ${queued.map((t) => `${t.id} (${t.owner})`).join(', ')}`));
   });
 
 agent

@@ -1,4 +1,4 @@
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { existsSync, promises as fs, mkdtempSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -6,6 +6,11 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   AgentError,
   MARKER_END,
+  STALE_MS,
+  activeDir,
+  ago,
+  markActive,
+  readActive,
   agentDefinitions,
   agentGuard,
   agentInit,
@@ -545,5 +550,83 @@ describe('agent continue', () => {
     expect(await runInteractive(plan)).toBe(7);
     plan.command = ['definitely-not-a-program-xyz'];
     expect(await runInteractive(plan)).toBeNull();
+  });
+});
+
+describe('agent activity', () => {
+  const sh = (args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const state = () => path.join(root, '.mdpm');
+  const marker = (name = 'one') => path.join(activeDir(state()), `${name}.json`);
+
+  it('marks a task active until stopped, and reports who is doing what', async () => {
+    const h = await markActive(state(), { task: 'one', agent: 'claude', mode: 'implement', run: 'r-1' });
+    const [run] = await readActive(state());
+    expect(run).toMatchObject({ task: 'one', agent: 'claude', mode: 'implement', run: 'r-1', pid: process.pid });
+    expect(existsSync(marker())).toBe(true);
+    h.stop();
+    h.stop(); // safe twice
+    expect(existsSync(marker())).toBe(false);
+    expect(await readActive(state())).toEqual([]);
+  });
+
+  it('ignores markers whose process is gone or whose heartbeat stopped', async () => {
+    const h = await markActive(state(), { task: 'one', agent: 'claude', mode: 'refine', run: 'r-1' });
+    const dead = spawnSync(process.execPath, ['-e', '']).pid!; // a process that has already exited
+    const file = JSON.parse(await fs.readFile(marker(), 'utf8'));
+    await fs.writeFile(marker('dead'), JSON.stringify({ ...file, task: 'dead', pid: dead }));
+    await fs.writeFile(marker('old'), JSON.stringify({ ...file, task: 'old', updated: new Date(Date.now() - STALE_MS - 5000).toISOString() }));
+    await fs.writeFile(marker('junk'), '{ not json');
+    expect((await readActive(state())).map((r) => r.task)).toEqual(['one']);
+    expect((await readActive(state(), Date.now() + STALE_MS + 5000)).map((r) => r.task)).toEqual([]); // no heartbeat for a minute
+    h.stop();
+  });
+
+  it('formats how long ago something started', () => {
+    const now = Date.parse('2026-10-19T12:00:00Z');
+    expect([30, 59 * 60, 125 * 60, 4].map((s) => ago(new Date(now - s * 1000).toISOString(), now))).toEqual(['30s', '59m', '2h 5m', '4s']);
+  });
+
+  async function repo(script: string) {
+    await write('.fake/agent.js', script);
+    const agent = path.join(root, '.fake', 'agent.js');
+    await write('.proj', `name: Root\nagents:\n  default: fake\n  fake:\n    command: [${JSON.stringify(process.execPath)}, ${JSON.stringify(agent)}, "{taskFile}"]\n    stdin: true\n    interactive: [fake-chat, "{prompt}"]\n`);
+    await write('one.md', task('title: One\nstatus: todo\nowner: fake\npriority: 1'));
+    await write('two.md', task('title: Two\nstatus: todo\nowner: fake\npriority: 9'));
+    sh(['init', '-q']);
+    sh(['-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A']);
+    sh(['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init']);
+  }
+
+  it('a run is marked active while the agent works, and cleared afterwards', async () => {
+    await repo(`
+      const fs = require('fs'), path = require('path');
+      process.stdin.resume().on('end', () => {
+        const m = path.join(process.env.MDPM_ROOT, '.mdpm', 'active', process.env.MDPM_TASK + '.json');
+        fs.writeFileSync(path.join(process.env.MDPM_ROOT, 'seen-' + process.env.MDPM_TASK + '.json'), fs.readFileSync(m, 'utf8'));
+      });`);
+    await runAgents({ root, task: 'one', echo: false, log: () => {} });
+    const seen = JSON.parse(await fs.readFile(path.join(root, 'seen-one.json'), 'utf8'));
+    expect(seen).toMatchObject({ task: 'one', agent: 'fake', mode: 'implement' });
+    expect(await readActive(state())).toEqual([]);
+    expect(existsSync(marker())).toBe(false);
+  });
+
+  it('does not start a task that is already being worked on, and skips it when picking', async () => {
+    await repo('process.exit(0);');
+    const h = await markActive(state(), { task: 'one', agent: 'other', mode: 'implement', run: 'r-x' });
+    await expect(runAgents({ root, task: 'one', echo: false, log: () => {} })).rejects.toThrow(/other is already implementing "one".*Wait for it to finish/);
+    await expect(planContinue({ root, task: 'one' })).rejects.toThrow(/already implementing "one"/);
+    const picked = await runAgents({ root, echo: false, log: () => {} });
+    expect(picked.records.map((r) => r.task)).toEqual(['two']);
+    h.stop();
+  });
+
+  it('marks an interactive session as chat', async () => {
+    await repo('process.exit(0);');
+    const plan = await planContinue({ root, task: 'one' });
+    plan.command = [process.execPath, '-e', `const fs=require('fs');fs.writeFileSync(${JSON.stringify(path.join(root, 'chat-seen.json'))}, fs.readFileSync(${JSON.stringify(marker())},'utf8'))`];
+    await runInteractive(plan);
+    expect(JSON.parse(await fs.readFile(path.join(root, 'chat-seen.json'), 'utf8'))).toMatchObject({ task: 'one', mode: 'chat' });
+    expect(existsSync(marker())).toBe(false);
   });
 });

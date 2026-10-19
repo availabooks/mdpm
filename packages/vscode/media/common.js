@@ -135,6 +135,29 @@ const mdpm = {
     document.getElementById('sel-n').textContent = `${n} selected`;
   },
 
+  /** `45s`, `3m`, `1h 5m`: how long ago `iso` was. */
+  ago(iso) {
+    const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+  },
+
+  /**
+   * What an agent is doing with a task right now ("claude implementing · 3m", pulsing), or a quiet
+   * "queued" for agent-owned tasks that are waiting for a run, so a card in Todo says what is going on.
+   */
+  runBadge(t) {
+    if (t.running) {
+      const verb = { refine: 'refining', implement: 'implementing', resume: 'resuming work', chat: 'chatting with you' }[t.running.mode] ?? 'working';
+      return `<span class="running" title="${esc(`${t.running.agent} is ${verb}. Started ${t.running.started}`)}"><span class="pulse"></span>${esc(t.running.agent)} ${verb} · <span class="age" data-since="${esc(t.running.started)}">${this.ago(t.running.started)}</span></span>`;
+    }
+    if (t.agentOwned && ['backlog', 'todo'].includes(t.status)) {
+      return `<span class="queued" title="${esc(`Queued for ${t.owner}: the next agent run picks it up`)}">queued</span>`;
+    }
+    return '';
+  },
+
   /** Agents only pick up backlog, todo and in-progress tasks. */
   canSendToAgent(task) {
     return ['backlog', 'todo', 'in-progress'].includes(task.status);
@@ -212,3 +235,10 @@ window.addEventListener('keydown', (e) => {
 document.getElementById('app').addEventListener('click', (e) => {
   if (!mdpm.ignoringClick && !e.target.closest('.card, .wf-label[data-key], .bar, .wf-track.unscheduled, button, a, input, select')) mdpm.clearSelection();
 });
+
+// Keep the "3m" in running badges current without re-rendering.
+if (typeof setInterval === 'function') {
+  setInterval(() => {
+    for (const el of document.querySelectorAll('.age[data-since]')) el.textContent = mdpm.ago(el.dataset.since);
+  }, 15000);
+}

@@ -1,4 +1,5 @@
 import {
+  ActiveRun,
   BLOCKED_STATUS,
   CriteriaProgress,
   FLOW_STAGES,
@@ -18,6 +19,8 @@ import {
   flowStage,
   loadWorkspace,
   previewTaskChange,
+  readActive,
+  stateDirFor,
   toPosix,
   updateTask,
   writeBack,
@@ -60,6 +63,8 @@ export interface TaskDTO {
 
   /** The owner is an agent (shown with a robot badge). */
   agentOwned: boolean;
+  /** An agent is working on this task right now. */
+  running?: { agent: string; mode: string; started: string };
 }
 
 export interface ModelDTO {
@@ -94,11 +99,49 @@ export class Model implements vscode.Disposable {
     watcher.onDidCreate(schedule);
     watcher.onDidChange(schedule);
     watcher.onDidDelete(schedule);
+    // Agent activity markers change every few seconds (heartbeats); only a change in who is working reloads the views.
+    const activity = vscode.workspace.createFileSystemWatcher('**/.mdpm/active/*.json');
+    const refresh = () => void this.refreshActive().then((changed) => changed && this.changed.fire());
+    activity.onDidCreate(refresh);
+    activity.onDidChange(refresh);
+    activity.onDidDelete(refresh);
+    // A run that died stops sending heartbeats; this notices that.
+    const poll = setInterval(refresh, 15_000);
     this.disposables.push(
       watcher,
+      activity,
+      { dispose: () => clearInterval(poll) },
       vscode.workspace.onDidChangeWorkspaceFolders(schedule),
       vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration('mdpm') && schedule()),
     );
+  }
+
+  /** Agents working right now (see `.mdpm/active/`). */
+  active: ActiveRun[] = [];
+  private activeSig = '';
+  private readonly stateDirs = new Map<string, string>();
+
+  /** Re-reads the activity markers. Returns whether who is working on what changed. */
+  private async refreshActive(): Promise<boolean> {
+    const runs: ActiveRun[] = [];
+    for (const ws of this.workspaces) {
+      let dir = this.stateDirs.get(ws.root);
+      if (!dir) {
+        dir = stateDirFor(ws.root);
+        if (dir) this.stateDirs.set(ws.root, dir);
+      }
+      if (dir) runs.push(...(await readActive(dir)));
+    }
+    const sig = runs.map((r) => `${r.task}|${r.agent}|${r.mode}|${r.started}`).join(';');
+    const changed = sig !== this.activeSig;
+    this.active = runs;
+    this.activeSig = sig;
+    return changed;
+  }
+
+  /** The agent working on `task` right now, if any. */
+  runningOn(task: Task): ActiveRun | undefined {
+    return this.active.find((r) => r.task === task.id);
   }
 
   get projects(): Project[] {
@@ -134,6 +177,7 @@ export class Model implements vscode.Disposable {
       this.warnMissingRoot(sub, missing);
     }
     this.workspaces = await Promise.all(roots.filter((r) => existsSync(r)).map((r) => loadWorkspace(r)));
+    await this.refreshActive();
     this.updateDiagnostics();
     this.changed.fire();
   }
@@ -343,6 +387,7 @@ export class Model implements vscode.Disposable {
         criteria: acceptanceCriteria(t.body),
         branch: typeof t.meta.branch === 'string' ? t.meta.branch : undefined,
         agentOwned: !!t.owner && agents.has(t.owner),
+        running: this.runningOn(t) && { agent: this.runningOn(t)!.agent, mode: this.runningOn(t)!.mode, started: this.runningOn(t)!.started },
       }));
     });
 
