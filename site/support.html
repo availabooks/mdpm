@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Support — mdpm</title>
+  <meta name="description" content="Get help with mdpm: FAQ, how to report a bug, and how to contact us.">
+  <link rel="canonical" href="https://mdpm.availabooks.com/support.html">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="mdpm">
+  <meta property="og:title" content="Support — mdpm">
+  <meta property="og:description" content="Get help with mdpm: FAQ, how to report a bug, and how to contact us.">
+  <meta property="og:url" content="https://mdpm.availabooks.com/support.html">
+  <meta name="twitter:card" content="summary">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site">
+    <div class="wrap">
+      <a class="brand" href="index.html">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="7" rx="1"/></svg>
+        mdpm
+      </a>
+      <nav>
+        <a href="index.html#how-it-works">How it works</a>
+        <a href="index.html#install">Install</a>
+        <a href="support.html">Support</a>
+        <a href="https://github.com/availabooks/mdpm">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="hero">
+      <h1>Support</h1>
+      <p>Stuck, or found a bug? Here is how to get help.</p>
+    </div>
+
+    <section>
+      <h2>Report a bug or request a feature</h2>
+      <p>Open an issue on <a href="https://github.com/availabooks/mdpm/issues">GitHub</a>. Include your mdpm and VS Code versions, your OS, and the output of <code>mdpm check --strict</code> if a task or project is involved.</p>
+      <h2>Contact</h2>
+      <p>Email <a href="mailto:availabooks@gmail.com">availabooks@gmail.com</a>.</p>
+    </section>
+
+    <section>
+      <h2>FAQ</h2>
+      <details>
+        <summary>What is a project, and what is a task?</summary>
+        <p>A project is any folder containing a <code>.proj</code> file. A task is a <code>.md</code> or <code>.task</code> file that starts with a YAML front matter block.</p>
+      </details>
+      <details>
+        <summary>The extension doesn't show anything.</summary>
+        <p>It activates only in workspaces that contain a <code>.proj</code> file. Create one with <em>mdpm: New Project</em>, or run <code>mdpm init tasks</code>. If mdpm lives in a subfolder of a large repo, set the <code>mdpm.root</code> setting.</p>
+      </details>
+      <details>
+        <summary>How do I have an agent work on a task?</summary>
+        <p>Set the task's <code>owner</code> to an agent such as <code>claude</code>, make sure it has acceptance criteria, then use <em>Send to Agent</em> or run <code>mdpm agent run</code>. The agent works on its own branch and hands the task to Review.</p>
+      </details>
+      <details>
+        <summary>Why is my task blocked?</summary>
+        <p>The agent needs a decision from you. Answer the open questions under <code>## Questions</code> in the task, then click <em>Unblock</em>.</p>
+      </details>
+      <details>
+        <summary>Can agents mark tasks done or push to main?</summary>
+        <p>No. Agents hand work off for review on a branch, and only a person moves a task to done.</p>
+      </details>
+      <details>
+        <summary>Does mdpm collect my data?</summary>
+        <p>No. See the <a href="privacy.html">privacy policy</a>.</p>
+      </details>
+      <details>
+        <summary>Which agents are supported?</summary>
+        <p>Claude Code, Codex and Cursor are built in. Any CLI can be added under <code>agents:</code> in the root <code>.proj</code>.</p>
+      </details>
+    </section>
+
+    <section>
+      <h2>Docs</h2>
+      <ul>
+        <li><a href="https://github.com/availabooks/mdpm#readme">README: file format, CLI and VS Code extension</a></li>
+        <li><a href="https://github.com/availabooks/mdpm/blob/main/docs/agent-workflow.md">Agent workflow</a></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="site">
+    <div class="wrap">
+      mdpm is open source under the MIT license.
+      <a href="support.html">Support</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/availabooks/mdpm">GitHub</a>
+    </div>
+  </footer>
+</body>
+</html>
