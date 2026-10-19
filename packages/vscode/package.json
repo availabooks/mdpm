@@ -90,6 +90,13 @@
         "icon": "$(project)"
       },
       {
+        "command": "mdpm.openFlow",
+        "title": "Open AI Flow Board (Idea → Planned → Building → Review → Done)",
+        "shortTitle": "Open AI Flow Board",
+        "category": "mdpm",
+        "icon": "$(sparkle)"
+      },
+      {
         "command": "mdpm.openWaterfall",
         "title": "Open Waterfall Timeline",
         "category": "mdpm",
@@ -173,14 +180,19 @@
           "group": "navigation@2"
         },
         {
-          "command": "mdpm.openWaterfall",
+          "command": "mdpm.openFlow",
           "when": "view == mdpm.projects",
           "group": "navigation@3"
         },
         {
-          "command": "mdpm.refresh",
+          "command": "mdpm.openWaterfall",
           "when": "view == mdpm.projects",
           "group": "navigation@4"
+        },
+        {
+          "command": "mdpm.refresh",
+          "when": "view == mdpm.projects",
+          "group": "navigation@5"
         },
         {
           "command": "mdpm.newProject",
@@ -210,9 +222,14 @@
           "group": "2_view@1"
         },
         {
-          "command": "mdpm.openWaterfall",
+          "command": "mdpm.openFlow",
           "when": "viewItem == project",
           "group": "2_view@2"
+        },
+        {
+          "command": "mdpm.openWaterfall",
+          "when": "viewItem == project",
+          "group": "2_view@3"
         },
         {
           "command": "mdpm.openProjectFile",

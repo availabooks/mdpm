@@ -1,14 +1,21 @@
 import {
   BLOCKED_STATUS,
+  CriteriaProgress,
+  FLOW_STAGES,
+  FLOW_STAGE_INFO,
+  FlowStage,
+  FlowStageInfo,
   Issue,
   Project,
   Task,
-  WriteBack,
   Workspace,
+  WriteBack,
+  acceptanceCriteria,
   agentDefinitions,
   agentNames,
   applyStatusDefaults,
   bodyAfter,
+  flowStage,
   loadWorkspace,
   previewTaskChange,
   toPosix,
@@ -44,6 +51,13 @@ export interface TaskDTO {
   projects: string[];
   shared: boolean;
   relPath: string;
+  /** Stage on the AI flow board. */
+  stage: FlowStage;
+  /** Checked / total acceptance criteria. */
+  criteria: CriteriaProgress;
+  /** Branch an agent handed off, if any. */
+  branch?: string;
+
   /** The owner is an agent (shown with a robot badge). */
   agentOwned: boolean;
 }
@@ -53,6 +67,9 @@ export interface ModelDTO {
   tasks: TaskDTO[];
   statuses: string[];
   owners: string[];
+  /** Columns of the AI flow board, in order. */
+  stages: FlowStageInfo[];
+
   /** Agent that "Send to agent" uses (setting `mdpm.agent.default`). */
   defaultAgent: string;
 }
@@ -322,6 +339,9 @@ export class Model implements vscode.Disposable {
         projects: t.locations.map((l) => l.project.file),
         shared: t.locations.length > 1,
         relPath: this.relPath(ws, t.file),
+        stage: flowStage(t, t.home.statuses),
+        criteria: acceptanceCriteria(t.body),
+        branch: typeof t.meta.branch === 'string' ? t.meta.branch : undefined,
         agentOwned: !!t.owner && agents.has(t.owner),
       }));
     });
@@ -331,6 +351,7 @@ export class Model implements vscode.Disposable {
       tasks,
       statuses: [...new Set(projects.flatMap((p) => p.statuses))],
       owners: [...new Set(tasks.map((t) => t.owner).filter((o): o is string => !!o))].sort(),
+      stages: FLOW_STAGES.map((s) => FLOW_STAGE_INFO[s]),
       defaultAgent: this.defaultAgent(),
     };
   }

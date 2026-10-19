@@ -1,15 +1,17 @@
 import * as crypto from 'crypto';
+import { FLOW_STAGE_INFO, FlowStage, statusForStage } from '@mdpm/core';
 import * as vscode from 'vscode';
 import { Task } from '@mdpm/core';
 import { setOwner, setStatus } from './bulk';
 import { Model } from './model';
 
-export type PanelKind = 'board' | 'waterfall';
+export type PanelKind = 'board' | 'flow' | 'waterfall';
 
 type Message =
   | { type: 'ready' }
   | { type: 'open'; file: string }
   | { type: 'setStatus'; file: string; status: string }
+  | { type: 'setStage'; file: string; stage: FlowStage }
   | { type: 'setDates'; file: string; start?: string; end?: string }
   | { type: 'setStatusMany'; files: string[]; status?: string }
   | { type: 'setOwnerMany'; files: string[]; owner?: string }
@@ -17,7 +19,7 @@ type Message =
   | { type: 'newTask'; project?: string; status?: string }
   | { type: 'agent'; action: 'send' | 'sendAs' | 'unblock'; file: string };
 
-const TITLES: Record<PanelKind, string> = { board: 'Kanban', waterfall: 'Waterfall' };
+const TITLES: Record<PanelKind, string> = { board: 'Kanban', flow: 'AI Flow', waterfall: 'Waterfall' };
 
 /** Hosts the board and waterfall webviews; one panel per kind. */
 export class ViewPanel {
@@ -74,6 +76,19 @@ export class ViewPanel {
         case 'setStatus':
           await this.model.update(this.task(m.file), { status: m.status });
           break;
+        case 'setStage': {
+          const task = this.task(m.file);
+          const status = statusForStage(m.stage, task.home.statuses);
+          if (!status) {
+            throw new Error(
+              `${task.home.name} has no status for the "${FLOW_STAGE_INFO[m.stage].label}" stage (its statuses are ${task.home.statuses.join(', ')}). ` +
+                `Add one of ${FLOW_STAGE_INFO[m.stage].statuses.filter((s) => s !== 'blocked').join(', ')} to "statuses" in its .proj file.`,
+            );
+          }
+          if (status !== task.status) await this.model.update(task, { status });
+          else this.post();
+          break;
+        }
         case 'setDates':
           await this.model.update(this.task(m.file), { start: m.start, end: m.end });
           break;

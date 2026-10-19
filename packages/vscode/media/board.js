@@ -1,22 +1,10 @@
 // Kanban board: one column per status, drag cards to change status.
 (() => {
   const app = document.getElementById('app');
-  const PRIORITY_WORDS = { critical: 0, urgent: 0, high: 1, medium: 2, normal: 2, low: 3 };
-
-  const priorityRank = (p) => {
-    if (typeof p === 'number') return p;
-    if (p === undefined) return 99;
-    const word = PRIORITY_WORDS[String(p).toLowerCase()];
-    if (word !== undefined) return word;
-    const n = parseFloat(String(p).replace(/^p/i, ''));
-    return isNaN(n) ? 50 : n;
-  };
-
-  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 
   function card(t) {
     const focused = mdpm.state.project;
-    const overdue = t.end && t.end < today && !mdpm.isDone(t);
+    const overdue = t.end && t.end < mdpm.today && !mdpm.isDone(t);
     const homeName = mdpm.project(t.home)?.name;
     const meta = [
       `<span class="id">${esc(t.id)}</span>`,
@@ -59,17 +47,9 @@
     const tasks = mdpm.filtered();
     for (const t of tasks) if (!columns.includes(t.status)) columns.push(t.status);
 
-    const sorted = (list) =>
-      list.sort(
-        (a, b) =>
-          priorityRank(a.priority) - priorityRank(b.priority) ||
-          (a.end ?? '9999').localeCompare(b.end ?? '9999') ||
-          a.title.localeCompare(b.title),
-      );
-
     app.innerHTML = `<div class="board">${columns
       .map((status) => {
-        const col = sorted(tasks.filter((t) => t.status === status));
+        const col = mdpm.sorted(tasks.filter((t) => t.status === status));
         return `
           <section class="column${status === BLOCKED ? ' blocked' : ''}" data-status="${esc(status)}">
             <header><span class="col-name">${esc(status)}</span><span class="count">${col.length}</span>

@@ -160,6 +160,33 @@ button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 .column.blocked header { color: var(--vscode-charts-yellow); }
 .card.blocked { background: color-mix(in srgb, var(--vscode-charts-yellow) 12%, var(--card)); border-color: color-mix(in srgb, var(--vscode-charts-yellow) 55%, var(--border)); }
 
+/* AI flow board */
+.flow .stage-idea { --accent: var(--vscode-descriptionForeground); }
+.flow .stage-planned { --accent: var(--vscode-charts-blue); }
+.flow .stage-building { --accent: var(--vscode-charts-purple); }
+.flow .stage-review { --accent: var(--vscode-charts-orange); }
+.flow .stage-done { --accent: var(--vscode-charts-green); }
+.flow .column { border-top: 3px solid var(--accent); }
+.flow .column .col-add { margin-left: 0; }
+.flow .actor { margin-left: auto; font-weight: normal; text-transform: none; letter-spacing: 0; font-size: 0.95em; color: var(--muted); }
+.flow .actor-you { color: var(--vscode-foreground); }
+.flow .hint { padding: 0 12px 8px; font-size: 0.85em; color: var(--muted); }
+.flow .lane-empty { padding: 12px 4px; font-size: 0.85em; color: var(--muted); font-style: italic; }
+.flow .card.blocked { --accent: var(--vscode-charts-yellow); }
+.flow .flag { font-size: 0.8em; font-weight: 600; color: var(--vscode-charts-yellow); margin-bottom: 4px; }
+.criteria { display: inline-flex; align-items: center; gap: 4px; }
+.criteria .bar { width: 40px; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.criteria .bar span { display: block; height: 100%; background: var(--accent); }
+.no-plan { font-style: italic; }
+.branch { font-family: var(--vscode-editor-font-family); }
+.needs-you { color: var(--muted); }
+.needs-you.active {
+  color: var(--vscode-badge-foreground);
+  background: var(--vscode-badge-background);
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+
 /* Waterfall */
 .wf-scroll { height: 100%; overflow: auto; }
 .wf-inner { position: relative; min-height: 100%; }

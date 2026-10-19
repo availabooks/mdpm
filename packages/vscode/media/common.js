@@ -9,6 +9,7 @@ const esc = (s) =>
 const STATUS_COLORS = ['--vscode-charts-blue', '--vscode-charts-purple', '--vscode-charts-orange'];
 const BLOCKED = 'blocked';
 const BLOCKED_COLOR = 'var(--vscode-charts-yellow)';
+const PRIORITY_WORDS = { critical: 0, urgent: 0, high: 1, medium: 2, normal: 2, low: 3 };
 
 const mdpm = {
   model: null,
@@ -16,6 +17,26 @@ const mdpm = {
   /** Keys of the tasks picked with Ctrl/Cmd+click. */
   selected: new Set(),
   render: () => {},
+  today: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10),
+
+  priorityRank(p) {
+    if (typeof p === 'number') return p;
+    if (p === undefined) return 99;
+    const word = PRIORITY_WORDS[String(p).toLowerCase()];
+    if (word !== undefined) return word;
+    const n = parseFloat(String(p).replace(/^p/i, ''));
+    return isNaN(n) ? 50 : n;
+  },
+
+  /** Sorts in place by priority, then due date, then title. */
+  sorted(list) {
+    return list.sort(
+      (a, b) =>
+        this.priorityRank(a.priority) - this.priorityRank(b.priority) ||
+        (a.end ?? '9999').localeCompare(b.end ?? '9999') ||
+        a.title.localeCompare(b.title),
+    );
+  },
 
   save() {
     vscode.setState(this.state);
