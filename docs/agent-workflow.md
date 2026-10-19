@@ -1,6 +1,6 @@
 # Agent workflow — design
 
-Status: **decisions made, ready for review** · Task: [`design-the-agent-workflow`](../tasks/agents/design-the-agent-workflow.md)
+Status: **phases 1–2 implemented** (see the README's *Agents* section); phase 3 is in the backlog · Task: [`design-the-agent-workflow`](../tasks/agents/design-the-agent-workflow.md)
 
 ## Goal
 
@@ -68,7 +68,7 @@ Returns the single best task for that agent (or nothing), along with its **mode*
 |---|---|---|
 | `in-progress`, owned by this agent | `resume` | Continue from the task's log (an earlier run was interrupted). |
 | `todo` | `implement` | Do the work, verify the acceptance criteria, hand off to `review`. |
-| `backlog` | `refine` | **No code changes.** Turn the idea into a ready task (context, acceptance criteria, verification steps, questions), then move it to `todo` or `blocked`. Refining is cheap and a good use of leftover usage. |
+| `backlog` | `refine` | **No code changes.** Turn the idea into a ready task (context, acceptance criteria, verification steps, questions), then block it with its questions, so the person reviews the refinement before it is implemented. Refining is cheap and a good use of leftover usage. |
 | `blocked`, `review`, `done` | — | Never picked. |
 
 Eligibility, in order:
@@ -286,11 +286,39 @@ schedule:              # (root .proj) when the local runner may run
    (option B), which means the git-based claim protocol is part of phase 3.
 4. **Agents:** Claude (default), Cursor and Codex presets, plus custom commands.
 
-Still open, to settle during implementation:
+Settled during implementation (2026-10-19):
+
+- **Refinement claims keep the status.** `mdpm claim` on a `refine` task only sets `owner`, so
+  a backlog idea doesn't show as in-progress while it is being written up.
+- **Released tasks wait for the person.** `release` keeps the owner, so `mdpm next` skips a
+  task whose latest log entry is the agent releasing it. Any later log entry (or reassigning
+  it) puts it back in the queue; VS Code's *Queue for Agent* writes such an entry.
+- **`mdpm` on the agent's PATH.** The runner writes small shims to `.mdpm/bin` that run the
+  same CLI that started the run, so agents can call `mdpm` even when it isn't installed
+  (e.g. when started from VS Code with the bundled CLI).
+- **Prompt on stdin** for Claude and Codex, so long prompts and quotes never pass through a
+  command line (on Windows, npm-installed `.cmd` programs are run via `cmd.exe` with every
+  argument quoted).
+- **Refinement always ends `blocked`.** The agent finishes a refine run with `mdpm block`; if it
+  doesn't (or moves the task to `todo` itself), the runner blocks it with a "review the
+  refinement" question. The person checks the task and unblocks it to have it implemented.
+- **Live output.** The Claude preset uses `--output-format stream-json --verbose`; the runner
+  prints each message and tool call as it happens and keeps the raw stream in the run log.
+  The stream's `rate_limit_event` (`status`, `resetsAt`) is the primary usage-limit signal.
+- **Verified `claude -p` flags** (Claude Code 2.1.303): `--permission-prompts none`,
+  `--permission-mode acceptEdits`, `--max-turns`, `--add-dir`, `--allowedTools`,
+  `--output-format json` (gives `session_id`, `total_cost_usd`, `subtype`/`terminal_reason`).
+
+Still open:
 
 - Task-state edits in the main checkout stay uncommitted until the person commits; should
   the runner auto-commit task-file-only changes? (Phase 1: no.)
-- The exact output and exit code of a usage-limit hit in `claude -p` (test before relying on it).
+- The exact output of a usage-limit hit in `claude -p` couldn't be reproduced on demand. The
+  runner treats a `rate_limit_event` whose status isn't `allowed…` as the limit, and also
+  recognizes the interactive wording (`You've hit your session limit · resets 3:45pm`)
+  and the older `Claude AI usage limit reached|<epoch>` form in stdout, stderr and the JSON
+  `result`; confirm against a real hit and adjust `LIMIT_PATTERNS` in
+  `packages/core/src/runner.ts` if needed.
 
 ## Phasing → follow-up tasks
 

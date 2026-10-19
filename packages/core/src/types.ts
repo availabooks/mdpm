@@ -6,7 +6,38 @@ export const TASK_EXTENSIONS = ['.md', '.task'] as const;
 export type TaskExtension = (typeof TASK_EXTENSIONS)[number];
 
 /** Kanban columns used when no `.proj` file in the chain defines `statuses`. */
-export const DEFAULT_STATUSES = ['backlog', 'todo', 'in-progress', 'review', 'done'];
+export const DEFAULT_STATUSES = ['backlog', 'todo', 'in-progress', 'blocked', 'review', 'done'];
+
+/** A status with this name is shown in yellow and never picked by agents. */
+export const BLOCKED_STATUS = 'blocked';
+
+/** What an agent does with a task: continue an interrupted run, do the work, or turn an idea into a ready task. */
+export type AgentMode = 'resume' | 'implement' | 'refine';
+export const AGENT_MODES: AgentMode[] = ['resume', 'implement', 'refine'];
+
+/** Effective `agent:` settings of a project, after inheritance and defaults. */
+export interface AgentSettings {
+  /** Agents may work on tasks in this project. */
+  enabled: boolean;
+  /** Agents may also pick tasks that have no owner. */
+  unassigned: boolean;
+  /** Kinds of work agents may do here. */
+  modes: AgentMode[];
+  /** Turn limit per task run. */
+  maxTurns: number;
+  /** Tools granted to the agent CLI, e.g. `Bash(npm test)`. */
+  allowedTools: string[];
+  /** Client-side spending cap per run, for agents that support one. */
+  maxBudgetUsd?: number;
+}
+
+export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
+  enabled: true,
+  unassigned: false,
+  modes: [...AGENT_MODES],
+  maxTurns: 50,
+  allowedTools: ['Bash(mdpm *)', 'Bash(git status*)', 'Bash(git diff*)', 'Bash(git log*)', 'Bash(git add *)', 'Bash(git commit *)'],
+};
 
 /** Contents of a `.proj` file. Unknown keys are preserved and passed through. */
 export interface ProjectMeta {
@@ -23,14 +54,18 @@ export interface ProjectMeta {
   required?: string[];
   /** Extra required fields per status, e.g. `in-progress: [owner]`. Inherited. */
   requiredByStatus?: Record<string, string[]>;
+  /** Settings for agents working in this project. Inherited key by key. */
+  agent?: Partial<AgentSettings>;
+  /** Agent CLI definitions (root `.proj` only). */
+  agents?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
 /** Keys with a meaning in `.proj`; anything else is passed through (and typo-checked). */
-export const PROJECT_FIELDS = ['name', 'description', 'owner', 'statuses', 'taskExtension', 'ignore', 'required', 'requiredByStatus'];
+export const PROJECT_FIELDS = ['name', 'description', 'owner', 'statuses', 'taskExtension', 'ignore', 'required', 'requiredByStatus', 'agent', 'agents'];
 
 /** Keys with a meaning in task front matter (plus accepted aliases for depends_on). */
-export const TASK_FIELDS = ['id', 'title', 'status', 'owner', 'author', 'created', 'start', 'end', 'priority', 'tags', 'depends_on'];
+export const TASK_FIELDS = ['id', 'title', 'status', 'owner', 'author', 'created', 'start', 'end', 'priority', 'tags', 'depends_on', 'branch', 'pr'];
 export const TASK_FIELD_ALIASES = ['dependsOn', 'depends'];
 
 export interface Project {
@@ -52,6 +87,8 @@ export interface Project {
   required: string[];
   /** Effective `requiredByStatus` rule, after inheritance. */
   requiredByStatus: Record<string, string[]>;
+  /** Effective `agent:` settings, after inheritance. */
+  agent: AgentSettings;
   /** 1-based line of each top-level key in the `.proj` file. */
   lines: Record<string, number>;
 }
@@ -84,6 +121,10 @@ export interface TaskMeta {
   priority?: string | number;
   tags?: string[];
   depends_on?: string[];
+  /** Branch holding the work, recorded by `mdpm handoff`. */
+  branch?: string;
+  /** Pull request URL, recorded by `mdpm handoff` or the runner. */
+  pr?: string;
   [key: string]: unknown;
 }
 

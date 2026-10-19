@@ -26,8 +26,8 @@
     "workspaceContains:**/.proj"
   ],
   "scripts": {
-    "build": "esbuild src/extension.ts --bundle --platform=node --target=node18 --format=cjs --external:vscode --outfile=dist/extension.js --minify",
-    "watch": "npm run build -- --watch --sourcemap",
+    "build": "esbuild src/extension.ts --bundle --platform=node --target=node18 --format=cjs --external:vscode --outfile=dist/extension.js --minify && esbuild ../cli/src/index.ts --bundle --platform=node --target=node18 --format=cjs --outfile=dist/mdpm.js --minify",
+    "watch": "esbuild src/extension.ts --bundle --platform=node --target=node18 --format=cjs --external:vscode --outfile=dist/extension.js --sourcemap --watch",
     "package": "npm run build && vsce package --no-dependencies --out mdpm-vscode.vsix"
   },
   "dependencies": {
@@ -136,6 +136,28 @@
         "command": "mdpm.revealInExplorer",
         "title": "Reveal in Explorer",
         "category": "mdpm"
+      },
+      {
+        "command": "mdpm.sendToAgent",
+        "title": "Send to Agent",
+        "category": "mdpm",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "mdpm.sendToAgentAs",
+        "title": "Send to Agent…",
+        "category": "mdpm"
+      },
+      {
+        "command": "mdpm.queueForAgent",
+        "title": "Queue for Agent…",
+        "category": "mdpm"
+      },
+      {
+        "command": "mdpm.unblock",
+        "title": "Unblock",
+        "category": "mdpm",
+        "icon": "$(debug-continue)"
       }
     ],
     "menus": {
@@ -214,13 +236,43 @@
         },
         {
           "command": "mdpm.unlinkTask",
-          "when": "viewItem == taskLink",
+          "when": "viewItem =~ /^taskLink/",
           "group": "2_link@2"
         },
         {
           "command": "mdpm.revealInExplorer",
           "when": "viewItem",
           "group": "9_reveal"
+        },
+        {
+          "command": "mdpm.sendToAgent",
+          "when": "viewItem =~ /^task.*:open$/",
+          "group": "inline"
+        },
+        {
+          "command": "mdpm.unblock",
+          "when": "viewItem =~ /^task.*:blocked$/",
+          "group": "inline"
+        },
+        {
+          "command": "mdpm.sendToAgent",
+          "when": "viewItem =~ /^task.*:open$/",
+          "group": "0_agent@1"
+        },
+        {
+          "command": "mdpm.sendToAgentAs",
+          "when": "viewItem =~ /^task.*:open$/",
+          "group": "0_agent@2"
+        },
+        {
+          "command": "mdpm.queueForAgent",
+          "when": "viewItem =~ /^task.*:open$/",
+          "group": "0_agent@3"
+        },
+        {
+          "command": "mdpm.unblock",
+          "when": "viewItem =~ /^task.*:blocked$/",
+          "group": "0_agent@1"
         }
       ],
       "commandPalette": [
@@ -235,6 +287,22 @@
         {
           "command": "mdpm.revealInExplorer",
           "when": "false"
+        },
+        {
+          "command": "mdpm.unblock",
+          "when": "mdpm.activeTaskBlocked"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "mdpm.sendToAgent",
+          "when": "mdpm.activeTask && !mdpm.activeTaskBlocked",
+          "group": "navigation@90"
+        },
+        {
+          "command": "mdpm.unblock",
+          "when": "mdpm.activeTaskBlocked",
+          "group": "navigation@90"
         }
       ]
     },
@@ -250,6 +318,24 @@
           "type": "string",
           "default": "",
           "description": "Owner for new tasks. Leave empty to leave tasks unassigned."
+        },
+        "mdpm.agent.default": {
+          "type": "string",
+          "default": "claude",
+          "description": "Agent that \"Send to Agent\" runs: claude, codex, cursor, or an agent defined under \"agents:\" in the root .proj. \"Send to Agent…\" picks another one."
+        },
+        "mdpm.taskTemplate": {
+          "type": "string",
+          "enum": [
+            "agent",
+            "default"
+          ],
+          "default": "agent",
+          "enumDescriptions": [
+            "Goal, Context, Acceptance criteria, Verification, Constraints and Questions: everything an agent needs to work on the task unattended.",
+            "Description and Acceptance criteria only."
+          ],
+          "description": "Body of tasks created with \"New Task\"."
         }
       }
     }
