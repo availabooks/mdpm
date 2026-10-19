@@ -3,6 +3,8 @@
 Kanban board, waterfall timeline and project tree for markdown tasks that live in your repo.
 See the main README at the root of the mdpm repo for the file format.
 
+Website and support: <https://mdpm.availabooks.com>
+
 ## Working with several tasks at once
 
 Ctrl+click (Cmd+click on macOS) a task to add it to the selection, or to remove it again.

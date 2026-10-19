@@ -3,6 +3,8 @@
 Tasks are markdown files. Projects are folders. Everything is plain text in git, so humans,
 VS Code, and AI agents (Claude, Cursor, …) can all read and update the same backlog.
 
+Website and support: <https://mdpm.availabooks.com>
+
 ```
 tasks/                        ← a project (has a .proj file)
 ├── .proj

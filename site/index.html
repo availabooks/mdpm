@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mdpm — markdown project management for you and your AI agents</title>
+  <meta name="description" content="Write tasks in markdown, see them on a kanban board in VS Code, and let the agent of your choice build them while you sleep. Review the work in the morning.">
+  <link rel="canonical" href="https://mdpm.availabooks.com/">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="mdpm">
+  <meta property="og:title" content="mdpm — markdown project management for you and your AI agents">
+  <meta property="og:description" content="Write tasks in markdown and let your agent build them overnight. Review the work in the morning.">
+  <meta property="og:url" content="https://mdpm.availabooks.com/">
+  <meta name="twitter:card" content="summary">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site">
+    <div class="wrap">
+      <a class="brand" href="index.html">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="7" rx="1"/></svg>
+        mdpm
+      </a>
+      <nav>
+        <a href="#how-it-works">How it works</a>
+        <a href="#install">Install</a>
+        <a href="support.html">Support</a>
+        <a href="https://github.com/availabooks/mdpm">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="hero">
+      <h1>Project management that your agents can read.</h1>
+      <p>mdpm is project management software that helps software engineers get the most out of their Claude subscription. Write tasks in markdown, and have the agent of your choice build them while you sleep.</p>
+      <a class="button" href="#install">Install mdpm</a>
+      <a class="button secondary" href="https://github.com/availabooks/mdpm">View on GitHub</a>
+    </div>
+
+    <section id="how-it-works">
+      <h2>How it works</h2>
+      <div class="grid">
+        <div class="card"><h3>1. Write tasks in markdown</h3><p>Tasks are plain <code>.md</code> files with YAML front matter. Projects are folders. Everything lives in your repo and in git.</p></div>
+        <div class="card"><h3>2. Plan on a board</h3><p>A kanban board, an AI flow board and a waterfall timeline in VS Code. Drag cards to change status.</p></div>
+        <div class="card"><h3>3. Agents work overnight</h3><p>Assign a task to <code>claude</code>, <code>codex</code> or <code>cursor</code>. The agent works on its own branch and writes progress and questions back into the task.</p></div>
+        <div class="card"><h3>4. Review in the morning</h3><p>Handed-off tasks wait in Review with a branch and pull request. Answer questions, check the work, and mark it done yourself.</p></div>
+      </div>
+      <p>Agents never mark work done and never touch your default branch. See the <a href="https://github.com/availabooks/mdpm/blob/main/docs/agent-workflow.md">agent workflow</a> for details.</p>
+    </section>
+
+    <section id="install">
+      <h2>Install</h2>
+      <h3>VS Code extension</h3>
+      <p>Search for <strong>mdpm</strong> in the VS Code Extensions view, or run:</p>
+      <pre>code --install-extension mdpm.mdpm-vscode</pre>
+      <p>The extension activates in any workspace that contains a <code>.proj</code> file.</p>
+      <h3>Command line</h3>
+      <pre>git clone https://github.com/availabooks/mdpm
+cd mdpm
+npm install &amp;&amp; npm run build
+npm link -w @mdpm/cli
+mdpm init tasks -n "My Product"
+mdpm new "Export CSV" -o claude --template agent
+mdpm agent run</pre>
+    </section>
+
+    <section>
+      <h2>Private by design</h2>
+      <p>mdpm collects no data. Your tasks stay in your repo, and this site sets no cookies. See the <a href="privacy.html">privacy policy</a>.</p>
+      <p>Questions or problems? Visit the <a href="support.html">support page</a>.</p>
+    </section>
+  </main>
+
+  <footer class="site">
+    <div class="wrap">
+      mdpm is open source under the MIT license.
+      <a href="support.html">Support</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/availabooks/mdpm">GitHub</a>
+    </div>
+  </footer>
+</body>
+</html>
