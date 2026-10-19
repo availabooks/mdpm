@@ -57,6 +57,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
     'mdpm.openBoard': async (arg) => ViewPanel.show('board', context.extensionUri, model, projectOf(arg)?.file),
 
+    'mdpm.openFlow': async (arg) => ViewPanel.show('flow', context.extensionUri, model, projectOf(arg)?.file),
+
     'mdpm.openWaterfall': async (arg) => ViewPanel.show('waterfall', context.extensionUri, model, projectOf(arg)?.file),
 
     'mdpm.newTask': async (arg) => {

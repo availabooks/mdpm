@@ -192,6 +192,13 @@ a separate development window.
   link a task into another project, create tasks and sub projects.
 - **Kanban board**: columns from `statuses`; drag cards to change status; filter by project
   (includes sub projects), owner, or text; `+` on a column creates a task in that status.
+- **AI flow board** (*mdpm: Open AI Flow Board*): the same tasks in five lanes for working
+  with agents: **Idea** (you write what you want; `backlog`) → **Planned** (the agent's plan,
+  i.e. acceptance criteria; `todo`) → **Building** (the agent codes; `in-progress`) →
+  **Review** (you check the work; `review`) → **Done** (the final status). `blocked` tasks
+  stay in the lane they were blocked from, flagged *Needs your answer*; the toolbar counts
+  what is waiting on you. Cards show acceptance-criteria progress and the handed-off branch.
+  Dragging a card sets the lane's status.
 - **Waterfall**: Gantt timeline from `start`/`end`, grouped by project, with dependency
   arrows (red when a task starts before its dependency ends). Drag a bar to move it, drag
   its edges to change start/end, click an unscheduled row to schedule it. Day/week/month zoom.
