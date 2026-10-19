@@ -1,6 +1,6 @@
 ---
 title: Show when an agent is actively working on a task
-status: review
+status: done
 owner: claude
 author: Elijah Allen
 created: 2026-10-19
@@ -10,6 +10,7 @@ tags:
   - vscode
 start: 2026-10-19
 branch: agent/agent-activity-indicator
+end: 2026-10-19
 ---
 
 # Show when an agent is actively working on a task
