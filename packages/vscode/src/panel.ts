@@ -1,5 +1,7 @@
 import * as crypto from 'crypto';
 import * as vscode from 'vscode';
+import { Task } from '@mdpm/core';
+import { setOwner, setStatus } from './bulk';
 import { Model } from './model';
 
 export type PanelKind = 'board' | 'waterfall';
@@ -9,6 +11,9 @@ type Message =
   | { type: 'open'; file: string }
   | { type: 'setStatus'; file: string; status: string }
   | { type: 'setDates'; file: string; start?: string; end?: string }
+  | { type: 'setStatusMany'; files: string[]; status?: string }
+  | { type: 'setOwnerMany'; files: string[]; owner?: string }
+  | { type: 'setDatesMany'; changes: { file: string; start?: string; end?: string }[] }
   | { type: 'newTask'; project?: string; status?: string };
 
 const TITLES: Record<PanelKind, string> = { board: 'Kanban', waterfall: 'Waterfall' };
@@ -71,6 +76,17 @@ export class ViewPanel {
         case 'setDates':
           await this.model.update(this.task(m.file), { start: m.start, end: m.end });
           break;
+        case 'setStatusMany':
+          await setStatus(this.model, this.tasks(m.files), m.status);
+          break;
+        case 'setOwnerMany':
+          await setOwner(this.model, this.tasks(m.files), m.owner);
+          break;
+        case 'setDatesMany': {
+          const tasks = this.tasks(m.changes.map((c) => c.file));
+          await this.model.updateMany(m.changes.map((c, i) => ({ task: tasks[i], changes: { start: c.start, end: c.end } })));
+          break;
+        }
         case 'newTask':
           await vscode.commands.executeCommand('mdpm.newTask', { projectKey: m.project, status: m.status });
           break;
@@ -87,6 +103,19 @@ export class ViewPanel {
     const task = this.model.task(file);
     if (!task) throw new Error(`${file} is no longer a task (it may have been moved or deleted). Run "mdpm: Refresh" and try again.`);
     return task;
+  }
+
+  /** All tasks for `files`; names every file that is gone, so nothing is changed half-way. */
+  private tasks(files: string[]) {
+    const tasks = files.map((f) => this.model.task(f));
+    const gone = files.filter((_, i) => !tasks[i]);
+    if (gone.length) {
+      throw new Error(
+        `${gone.join(', ')} ${gone.length > 1 ? 'are' : 'is'} no longer a task (moved or deleted?), so none of the ${files.length} selected tasks were changed. ` +
+          'Run "mdpm: Refresh", select the tasks again and repeat the change.',
+      );
+    }
+    return tasks as Task[];
   }
 
   private html(media: vscode.Uri): string {

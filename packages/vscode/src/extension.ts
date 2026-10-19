@@ -1,6 +1,7 @@
 import { Project, Task, createProject, createTask, defaultAuthor, isFinalStatus, linkTask, newTaskMeta, nextTaskPath, previewNewTask, slugify, today, unlinkTask } from '@mdpm/core';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { setOwner, setStatus } from './bulk';
 import { Model } from './model';
 import { ViewPanel } from './panel';
 import { Node, ProjectTree } from './tree';
@@ -11,7 +12,7 @@ type CommandArg = Node | { projectKey?: string; status?: string } | undefined;
 export async function activate(context: vscode.ExtensionContext) {
   const model = new Model();
   const tree = new ProjectTree(model);
-  context.subscriptions.push(model, vscode.window.registerTreeDataProvider('mdpm.projects', tree));
+  context.subscriptions.push(model, vscode.window.createTreeView('mdpm.projects', { treeDataProvider: tree, canSelectMany: true }));
 
   const projectOf = (arg: CommandArg): Project | undefined => {
     if (arg && 'kind' in arg) return arg.kind === 'project' ? arg.project : arg.location.project;
@@ -44,15 +45,30 @@ export async function activate(context: vscode.ExtensionContext) {
     return task;
   };
 
-  const run = (fn: (arg: CommandArg) => Promise<unknown>) => async (arg: CommandArg) => {
+  /**
+   * The tasks a command targets: every task selected in the tree when the clicked node is
+   * part of a multi-selection (project nodes are ignored), else the single task.
+   */
+  const requireTasks = (arg: CommandArg, selected?: Node[]): Task[] => {
+    const id = (n: Node) => (n.kind === 'project' ? n.project.file : n.location.path);
+    const clicked = arg && 'kind' in arg ? id(arg) : undefined;
+    if (clicked && selected && selected.length > 1 && selected.some((n) => id(n) === clicked)) {
+      const tasks = selected.flatMap((n) => (n.kind === 'task' ? [n.task] : []));
+      if (tasks.length) return tasks;
+    }
+    const task = requireTask(arg);
+    return task ? [task] : [];
+  };
+
+  const run = (fn: (arg: CommandArg, selected?: Node[]) => Promise<unknown>) => async (arg: CommandArg, selected?: unknown) => {
     try {
-      await fn(arg);
+      await fn(arg, Array.isArray(selected) ? selected : undefined);
     } catch (e) {
       vscode.window.showErrorMessage(`mdpm: ${e instanceof Error ? e.message : e}`);
     }
   };
 
-  const commands: Record<string, (arg: CommandArg) => Promise<unknown>> = {
+  const commands: Record<string, (arg: CommandArg, selected?: Node[]) => Promise<unknown>> = {
     'mdpm.refresh': () => model.reload(),
 
     'mdpm.openBoard': async (arg) => ViewPanel.show('board', context.extensionUri, model, projectOf(arg)?.file),
@@ -132,24 +148,9 @@ export async function activate(context: vscode.ExtensionContext) {
       await vscode.window.showTextDocument(vscode.Uri.file(file));
     },
 
-    'mdpm.setStatus': async (arg) => {
-      const task = requireTask(arg);
-      if (!task) return;
-      const status = await vscode.window.showQuickPick(
-        task.home.statuses.map((s) => ({ label: s, description: s === task.status ? 'current' : undefined })),
-        { placeHolder: `Status for "${task.title}"` },
-      );
-      if (!status || status.label === task.status) return;
-      await model.update(task, { status: status.label });
-    },
+    'mdpm.setStatus': async (arg, selected) => setStatus(model, requireTasks(arg, selected)),
 
-    'mdpm.setOwner': async (arg) => {
-      const task = requireTask(arg);
-      if (!task) return;
-      const owner = await vscode.window.showInputBox({ prompt: `Owner of "${task.title}" (empty to unassign)`, value: task.owner ?? '' });
-      if (owner === undefined) return;
-      await model.update(task, { owner: owner.trim() || null });
-    },
+    'mdpm.setOwner': async (arg, selected) => setOwner(model, requireTasks(arg, selected)),
 
     'mdpm.linkTask': async (arg) => {
       const task = requireTask(arg);

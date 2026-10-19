@@ -10,6 +10,8 @@ const STATUS_COLORS = ['--vscode-charts-blue', '--vscode-charts-yellow', '--vsco
 const mdpm = {
   model: null,
   state: Object.assign({ project: '', owner: '', q: '' }, vscode.getState() || {}),
+  /** Keys of the tasks picked with Ctrl/Cmd+click. */
+  selected: new Set(),
   render: () => {},
 
   save() {
@@ -60,6 +62,54 @@ const mdpm = {
     return `var(${STATUS_COLORS[(i - 1) % STATUS_COLORS.length]})`;
   },
 
+  /** Ctrl/Cmd+click toggles the task in the selection; a plain click clears it and opens the task. */
+  clickTask(e, key) {
+    if (e.ctrlKey || e.metaKey) {
+      if (this.selected.has(key)) this.selected.delete(key);
+      else this.selected.add(key);
+      this.paintSelection();
+    } else {
+      this.clearSelection();
+      this.post({ type: 'open', file: key });
+    }
+  },
+
+  /** Makes the click that follows a pointer drag not count as a click on empty space. */
+  ignoreClick() {
+    this.ignoringClick = true;
+    setTimeout(() => (this.ignoringClick = false));
+  },
+
+  clearSelection() {
+    if (!this.selected.size) return;
+    this.selected.clear();
+    this.paintSelection();
+  },
+
+  /** Drops selected keys that no longer exist or are hidden by the filters. */
+  pruneSelection() {
+    if (!this.selected.size || !this.model) return;
+    const visible = new Set(this.filtered().map((t) => t.key));
+    for (const key of this.selected) if (!visible.has(key)) this.selected.delete(key);
+  },
+
+  /** Selected tasks, in model order. */
+  selectedTasks() {
+    return this.model.tasks.filter((t) => this.selected.has(t.key));
+  },
+
+  /** Updates the selected style and the toolbar's selection controls without re-rendering. */
+  paintSelection() {
+    for (const el of document.querySelectorAll('.card[data-key], .wf-label[data-key], .bar[data-key]')) {
+      el.classList.toggle('selected', this.selected.has(el.dataset.key));
+    }
+    const n = this.selected.size;
+    const box = document.getElementById('sel');
+    if (!box) return;
+    box.hidden = !n;
+    document.getElementById('sel-n').textContent = `${n} selected`;
+  },
+
   /** Builds the toolbar once; later calls only refresh the dropdown options. */
   toolbar(extraHtml, wireExtra) {
     const bar = document.getElementById('toolbar');
@@ -69,12 +119,21 @@ const mdpm = {
         <label>Project <select id="f-project"></select></label>
         <label>Owner <select id="f-owner"></select></label>
         <input id="f-q" type="search" placeholder="Filter…" value="${esc(this.state.q)}">
+        <span id="sel" class="sel" hidden>
+          <span id="sel-n" class="sel-n"></span>
+          <button id="b-sel-status" title="Set the status of all selected tasks">Set status…</button>
+          <button id="b-sel-owner" title="Set the owner of all selected tasks">Set owner…</button>
+          <button id="b-sel-clear" title="Clear the selection (Escape)">Clear</button>
+        </span>
         <span class="spacer"></span>
         ${extraHtml}`;
       const on = (id, ev, fn) => document.getElementById(id).addEventListener(ev, fn);
       on('f-project', 'change', (e) => this.set({ project: e.target.value }));
       on('f-owner', 'change', (e) => this.set({ owner: e.target.value }));
       on('f-q', 'input', (e) => this.set({ q: e.target.value }));
+      on('b-sel-status', 'click', () => this.post({ type: 'setStatusMany', files: [...this.selected] }));
+      on('b-sel-owner', 'click', () => this.post({ type: 'setOwnerMany', files: [...this.selected] }));
+      on('b-sel-clear', 'click', () => this.clearSelection());
       wireExtra?.();
     }
     const m = this.model;
@@ -92,7 +151,14 @@ const mdpm = {
   set(patch) {
     Object.assign(this.state, patch);
     this.save();
+    this.refresh();
+  },
+
+  /** Re-renders after the model or the filters changed. */
+  refresh() {
+    this.pruneSelection();
     this.render();
+    this.paintSelection();
   },
 };
 
@@ -100,10 +166,19 @@ window.addEventListener('message', (e) => {
   const msg = e.data;
   if (msg.type === 'model') {
     mdpm.model = msg.data;
-    mdpm.render();
+    mdpm.refresh();
   } else if (msg.type === 'focusProject') {
     mdpm.state.project = msg.project;
     mdpm.save();
-    if (mdpm.model) mdpm.render();
+    if (mdpm.model) mdpm.refresh();
   }
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') mdpm.clearSelection();
+});
+
+// A click on empty board/timeline space clears the selection.
+document.getElementById('app').addEventListener('click', (e) => {
+  if (!mdpm.ignoringClick && !e.target.closest('.card, .wf-label[data-key], .bar, .wf-track.unscheduled, button, a, input, select')) mdpm.clearSelection();
 });
