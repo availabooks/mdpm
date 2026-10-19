@@ -8,7 +8,7 @@
     "url": "https://github.com/availabooks/mdpm.git",
     "directory": "packages/vscode"
   },
-  "homepage": "https://github.com/availabooks/mdpm#readme",
+  "homepage": "https://mdpm.availabooks.com",
   "bugs": {
     "url": "https://github.com/availabooks/mdpm/issues"
   },
