@@ -1,19 +1,19 @@
 ---
 title: Flow board only VS Code
-status: todo
+status: review
 author: Elijah Allen
 created: 2026-10-20
 priority: 3
 tags:
   - flow
   - vscode
-depends_on:
-  - flow-model-commands-and-migration
+approved: 2026-10-20
+branch: flow/ai-flow-redesign
 ---
 
 # Flow board only VS Code
 
-## Goal
+## Idea
 
 Make the AI flow board the VS Code extension's only board. It has the columns Idea · Plan · Executing · Review · Done, stage-specific card actions (Approve, Answer & unblock, Accept, Rework), and a toolbar that shows the execution slot and what is waiting on the person. Remove the Kanban board, the waterfall, and the task-era commands. The spec is the *VS Code* section of [docs/agent-workflow.md](../../docs/agent-workflow.md).
 
@@ -26,13 +26,13 @@ Make the AI flow board the VS Code extension's only board. It has the columns Id
 
 ## Acceptance criteria
 
-- [ ] *Open Board* opens the flow board. The Kanban and waterfall views, their commands, and their media files are deleted.
-- [ ] The columns are Idea, Plan, Executing, Review and Done. Plan cards show "awaiting approval" or "approved #n in queue". Blocked cards are yellow in their `blocked_from` column.
-- [ ] Card actions by stage: Idea → *Plan now*; Plan → **Approve** / *Re-plan*; Executing → *Continue with agent*; Blocked → **Answer & unblock** (opens the questions, then asks for an answer); Review → **Accept**, **Rework…** (asks for feedback), *Open PR*. Each action calls the matching `mdpm` command.
-- [ ] Dragging a card only allows the moves a person can make (for example plan → approved queue, review → done). An invalid drop shows why it was refused.
-- [ ] The toolbar shows the slot ("Executing: <idea> · 12m", "Blocked: <idea>" or "Slot free · N approved plans") and "Waiting on you: N".
-- [ ] The Projects tree groups ideas by stage inside each project. *New Task* becomes *New Idea*.
-- [ ] The extension README and the root README *VS Code extension* section are updated.
+- [x] *Open Board* opens the flow board. The Kanban and waterfall views, their commands, and their media files are deleted.
+- [x] The columns are Idea, Plan, Executing, Review and Done. Plan cards show "awaiting approval" or "approved #n in queue". Blocked cards are yellow in their `blocked_from` column.
+- [x] Card actions by stage: Idea → *Plan now*; Plan → **Approve** / *Re-plan*; Executing → *Continue with agent*; Blocked → **Answer & unblock** (opens the questions, then asks for an answer); Review → **Accept**, **Rework…** (asks for feedback), *Open PR*. Each action calls the matching `mdpm` command.
+- [x] Dragging a card only allows the moves a person can make (for example plan → approved queue, review → done). An invalid drop shows why it was refused.
+- [x] The toolbar shows the slot ("Executing: <idea> · 12m", "Blocked: <idea>" or "Slot free · N approved plans") and "Waiting on you: N".
+- [x] The Projects tree groups ideas by stage inside each project. *New Task* becomes *New Idea*.
+- [x] The extension README and the root README *VS Code extension* section are updated.
 
 ## Verification
 
@@ -44,3 +44,10 @@ Make the AI flow board the VS Code extension's only board. It has the columns Id
 - Keep the existing look (the colours, the yellow for blocked, the activity glow).
 
 ## Questions
+
+## Log
+
+- 2026-10-20 10:27 Elijah Allen — approved the plan
+- 2026-10-20 10:27 claude — Approved on Elijah's instruction in chat (2026-10-20): 'can you just build it for me'.
+- 2026-10-20 10:27 claude — started executing on branch idea/flow-board-only-vs-code
+- 2026-10-20 10:27 claude — handed off for review: Flow board is the only board (Kanban, waterfall, bulk status/owner gone): stage actions, drag rules via core dropIntent, slot + waiting-on-you in the toolbar, Run next, multi-select Approve/Accept; tree groups ideas by stage; commands/menus/settings rewritten; READMEs updated. Verified: typecheck, webview tests (7). Not verified: the by-hand walkthrough in VS Code — please run npm run install-extension and try it.

@@ -3,16 +3,14 @@ title: our UI should allow the user to select more than one task with ctrl/cmd c
 status: done
 author: Elijah Allen
 created: 2026-10-19
-owner: claude
-start: 2026-10-19
 branch: agent/our-ui-should-allow-the-user-to-select-more-than-one-task-wi
 pr: https://github.com/availabooks/mdpm/pull/1
-end: 2026-10-19
+completed: 2026-10-19
 ---
 
 # our UI should allow the user to select more than one task with ctrl/cmd click
 
-## Description
+## Idea
 
 The user may want to manage several tasks at once. Our UIs should let them multi-select tasks with ctrl/cmd click and then act on all selected tasks together.
 
@@ -86,7 +84,7 @@ Manual check: press F5 with the `.vscode/launch.json` config, or `npm run instal
 - Shift+click range selection, bulk delete, and bulk link/unlink are out of scope.
 - Keep every error message actionable: say what went wrong and how to fix it.
 
-## Agent log
+## Log
 
 - 2026-10-19 10:35 claude — claimed for refinement (run r-20261019-103504-vsby)
 - 2026-10-19 10:36 claude — Refined: scoped multi-select (Ctrl/Cmd+click) to Kanban, Waterfall and Projects tree; bulk set status/owner, multi-card drag, multi-bar shift; single validation modal + one reload; shift-range/bulk delete out of scope. Added context, criteria, verification, constraints.

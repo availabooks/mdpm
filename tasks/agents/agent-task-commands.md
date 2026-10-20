@@ -7,16 +7,12 @@ priority: 1
 tags:
   - agents
   - cli
-depends_on:
-  - blocked-status-in-all-views
-end: 2026-10-19
-owner: claude
-start: 2026-10-19
+completed: 2026-10-19
 ---
 
 # Agent task commands
 
-## Description
+## Idea
 
 The CLI commands agents use to find work and write back to tasks. Design: [docs/agent-workflow.md](../../docs/agent-workflow.md) (sections "What an agent works on next" and "How an agent writes back").
 
@@ -29,7 +25,7 @@ The CLI commands agents use to find work and write back to tasks. Design: [docs/
 - [x] `claim` refuses a task that is already claimed by another agent (local check; git-based claims come later in `agent-claim-and-lock-protocol`)
 - [x] New `.proj` settings (`agent.*`) are validated and documented; tests cover selection, ranking and every command
 
-## Agent log
+## Log
 
 - 2026-10-19 10:26 claude — claimed (run session-2026-10-19)
 - 2026-10-19 10:27 claude — handed off for review: mdpm next (--agent, --all, --json; eligibility, modes, ranking and skip reasons), claim/log/block/handoff/release (validated incl. the body, --json, signed log entries, Questions, branch/pr), MDPM_AGENT guard (no final status, only claimed tasks), claim refuses tasks someone else owns (--force takes over). agent.* settings inherited key by key and validated; documented in README. Choices beyond the design: refine claims keep the status; next skips a task whose last log entry is the agent's release until someone logs on it. Tests cover selection, ranking, every write-back and the guard.

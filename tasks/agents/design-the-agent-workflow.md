@@ -6,14 +6,12 @@ created: 2026-10-19
 priority: 1
 tags:
   - agents
-owner: claude
-start: 2026-10-19
-end: 2026-10-19
+completed: 2026-10-19
 ---
 
 # Design the agent workflow
 
-## Description
+## Idea
 
 I want to make this project work with agents in the following way.
 
@@ -37,7 +35,7 @@ new `blocked` status, `mdpm next` (what to work on), the task write-back command
 and AGENTS.md, `mdpm agent run` with configurable agent CLIs, the VS Code buttons, scheduling
 around usage limits, and the phased follow-up tasks.
 
-## Agent log
+## Log
 
 - 2026-10-19 claude — claimed; researched Claude Code headless mode, routines, usage limits and hooks; wrote the draft design. Waited on the open questions.
 - 2026-10-19 claude — recorded the decisions (assigned + unassigned queue, branch + PR, local runner and routines in phase 3, Claude/Cursor/Codex/custom agents); created 5 follow-up tasks and updated the 3 existing ones with descriptions, acceptance criteria and dependencies. Handing off for review of docs/agent-workflow.md.

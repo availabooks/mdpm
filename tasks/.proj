@@ -1,19 +1,6 @@
 name: mdpm
 description: ""
 owner: Elijah Allen
-statuses:
-  - backlog
-  - todo
-  - in-progress
-  - blocked
-  - review
-  - done
-# Agents and humans must leave tasks in a valid state; `mdpm check --strict` enforces this in CI.
-requiredByStatus:
-  in-progress: [owner, start]
-  blocked: [owner]
-  review: [owner]
-  done: [end]
 # Agents may run the checks CI runs.
 agent:
   allowedTools:

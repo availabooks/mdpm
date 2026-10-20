@@ -1,20 +1,18 @@
 ---
 title: Scheduled runs to use spare weekly credits
-status: backlog
+status: plan
 author: Elijah Allen
 created: 2026-10-19
 tags:
   - agents
   - credits
-depends_on:
-  - flow-runner-one-idea-at-a-time
 priority: 3
 ---
 
 
 # Scheduled runs to use spare weekly credits
 
-## Description
+## Idea
 
 Use subscription usage that would otherwise expire, without getting in the way of interactive work. In the flow, a scheduled run is just `mdpm agent run --until-idle` during quiet hours: every run is useful, because when nothing is approved to execute, the agent plans ideas. Design: [docs/agent-workflow.md](../../docs/agent-workflow.md) (*Using spare usage*). Rewritten 2026-10-20 for the flow; cloud routines and the git-based claim protocol are dropped.
 

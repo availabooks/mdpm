@@ -1,20 +1,16 @@
 ---
 title: Agent claim and lock protocol
-status: backlog
+status: plan
 author: Elijah Allen
 created: 2026-10-19
 tags:
   - agents
-depends_on:
-  - agent-task-commands
 priority: 3
-start: 2026-10-27
-end: 2026-10-27
 ---
 
 # Agent claim and lock protocol
 
-## Description
+## Idea
 
 Make claims safe when several agents run at once, on different machines or in the cloud, where task-state changes travel through git. Design: [docs/agent-workflow.md](../../docs/agent-workflow.md) (Scheduling, option B; Decisions 3).
 

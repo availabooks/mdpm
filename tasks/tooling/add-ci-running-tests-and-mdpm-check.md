@@ -1,6 +1,6 @@
 ---
 title: Add CI running tests and mdpm check
-status: backlog
+status: idea
 author: Elijah Allen
 created: 2026-10-19
 tags:
@@ -9,7 +9,7 @@ tags:
 
 # Add CI running tests and mdpm check
 
-## Description
+## Idea
 
 
 ## Acceptance criteria
