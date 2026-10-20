@@ -1,8 +1,8 @@
 # AI flow — design
 
-Status: **design agreed 2026-10-20**, not implemented yet. This replaces the task-based agent
+Status: **implemented 2026-10-20** (see the README). This replaces the task-based agent
 workflow (phases 1–2, shipped 2026-10-19). That design is in git history at `8a5f188`.
-The work is broken into ideas in [`tasks/flow/`](../tasks/flow/); see *Build order* below.
+The work was done as the ideas in [`tasks/flow/`](../tasks/flow/); see *Build order* below.
 
 ## Why
 
@@ -232,6 +232,20 @@ the skill and AGENTS.md section. Unknown statuses are reported, not guessed.
 | 3 | [`flow-board-only-vs-code`](../tasks/flow/flow-board-only-vs-code.md) | 1 (2 for the slot display) |
 | 4 | [`scheduled-runs-to-use-spare-weekly-credits`](../tasks/agents/scheduled-runs-to-use-spare-weekly-credits.md), rewritten for the flow | 2 |
 
-Until #1 lands, these are ordinary `todo` tasks with no owner. **Approving one** means
-assigning it to `claude` (*Queue for Agent* or `mdpm set <id> owner=claude`). The current
-runner then builds it, so the old system builds the new one.
+#1–#3 were built together on branch `flow/ai-flow-redesign`, and this repo was migrated with
+`mdpm migrate --write`. #4 waits in the plan queue for approval.
+
+Settled during implementation (2026-10-20):
+
+- **Reopening a conversation** uses the session id of the agent's last run on the idea
+  (`claude --resume <id>`) instead of `--continue`: every idea shares the agent worktree, so
+  "the latest conversation in this directory" could belong to another idea.
+- **A plan run that wrote a complete plan but didn't propose** is proposed by the runner (the
+  person reviews it either way); one that wrote no plan is blocked with a question.
+- **After handoff** the agent worktree detaches, so the person can check the idea's branch out
+  to review it.
+- **`--until-idle`** stops early when a run ends without writing anything back, and runs one
+  idea at most three times per loop, so a stuck idea can't use up the week's usage.
+- **`mdpm migrate`** regenerates the skill and AGENTS.md only where `mdpm agent init` wrote
+  them before; a blocked task whose only open question was "review the refinement" becomes a
+  plan waiting for approval.

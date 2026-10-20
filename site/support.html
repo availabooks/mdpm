@@ -39,7 +39,7 @@
 
     <section>
       <h2>Report a bug or request a feature</h2>
-      <p>Open an issue on <a href="https://github.com/availabooks/mdpm/issues">GitHub</a>. Include your mdpm and VS Code versions, your OS, and the output of <code>mdpm check --strict</code> if a task or project is involved.</p>
+      <p>Open an issue on <a href="https://github.com/availabooks/mdpm/issues">GitHub</a>. Include your mdpm and VS Code versions, your OS, and the output of <code>mdpm check --strict</code> if an idea or project is involved.</p>
       <h2>Contact</h2>
       <p>Email <a href="mailto:availabooks@gmail.com">availabooks@gmail.com</a>.</p>
     </section>
@@ -47,24 +47,24 @@
     <section>
       <h2>FAQ</h2>
       <details>
-        <summary>What is a project, and what is a task?</summary>
-        <p>A project is any folder containing a <code>.proj</code> file. A task is a <code>.md</code> or <code>.task</code> file that starts with a YAML front matter block.</p>
+        <summary>What is a project, and what is an idea?</summary>
+        <p>A project is any folder containing a <code>.proj</code> file. An idea is a <code>.md</code> or <code>.task</code> file that starts with a YAML front matter block. Each idea moves through the flow: idea → plan → executing → review → done.</p>
       </details>
       <details>
         <summary>The extension doesn't show anything.</summary>
         <p>It activates only in workspaces that contain a <code>.proj</code> file. Create one with <em>mdpm: New Project</em>, or run <code>mdpm init tasks</code>. If mdpm lives in a subfolder of a large repo, set the <code>mdpm.root</code> setting.</p>
       </details>
       <details>
-        <summary>How do I have an agent work on a task?</summary>
-        <p>Set the task's <code>owner</code> to an agent such as <code>claude</code>, make sure it has acceptance criteria, then use <em>Send to Agent</em> or run <code>mdpm agent run</code>. The agent works on its own branch and hands the task to Review.</p>
+        <summary>How do I have an agent work on an idea?</summary>
+        <p>Write the idea (<em>mdpm: New Idea</em>, or <code>mdpm idea "…"</code>). The agent plans it on its next run (<em>Plan now</em>, or <code>mdpm agent run</code>). Approve the plan, and the agent builds it on its own branch and hands it to Review. It executes one idea at a time.</p>
       </details>
       <details>
-        <summary>Why is my task blocked?</summary>
-        <p>The agent needs a decision from you. Answer the open questions under <code>## Questions</code> in the task, then click <em>Unblock</em>.</p>
+        <summary>Why is my idea blocked?</summary>
+        <p>The agent needs a decision from you. Click <em>Answer</em> on the card (or run <code>mdpm unblock &lt;id&gt; "&lt;answer&gt;"</code>); the idea goes back to where it was.</p>
       </details>
       <details>
-        <summary>Can agents mark tasks done or push to main?</summary>
-        <p>No. Agents hand work off for review on a branch, and only a person moves a task to done.</p>
+        <summary>Can agents approve their own plans, accept their work, or push to main?</summary>
+        <p>No. Agents propose plans and hand work off for review on a branch; only a person approves a plan or accepts the work.</p>
       </details>
       <details>
         <summary>Does mdpm collect my data?</summary>

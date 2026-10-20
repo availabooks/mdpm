@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>mdpm — markdown project management for you and your AI agents</title>
-  <meta name="description" content="Write tasks in markdown, see them on a kanban board in VS Code, and let the agent of your choice build them while you sleep. Review the work in the morning.">
+  <title>mdpm — an AI flow that lives in your repo</title>
+  <meta name="description" content="Write ideas in markdown, approve the agent's plans, and let it build them one at a time on your spare subscription usage. Review the work when it is done.">
   <link rel="canonical" href="https://mdpm.availabooks.com/">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="mdpm">
-  <meta property="og:title" content="mdpm — markdown project management for you and your AI agents">
-  <meta property="og:description" content="Write tasks in markdown and let your agent build them overnight. Review the work in the morning.">
+  <meta property="og:title" content="mdpm — an AI flow that lives in your repo">
+  <meta property="og:description" content="Idea → plan → executing → review → done. Write ideas, approve plans, review the work.">
   <meta property="og:url" content="https://mdpm.availabooks.com/">
   <meta name="twitter:card" content="summary">
   <link rel="stylesheet" href="style.css">
@@ -33,8 +33,8 @@
 
   <main class="wrap">
     <div class="hero">
-      <h1>Project management that your agents can read.</h1>
-      <p>mdpm is project management software that helps software engineers get the most out of their Claude subscription. Write tasks in markdown, and have the agent of your choice build them while you sleep.</p>
+      <h1>From idea to reviewed code, one idea at a time.</h1>
+      <p>mdpm helps software engineers get the most out of their Claude subscription. Write down ideas in markdown; the agent of your choice plans them, you approve the plans, and it builds them one after another on usage that would otherwise go to waste.</p>
       <a class="button" href="#install">Install mdpm</a>
       <a class="button secondary" href="https://github.com/availabooks/mdpm">View on GitHub</a>
     </div>
@@ -42,12 +42,12 @@
     <section id="how-it-works">
       <h2>How it works</h2>
       <div class="grid">
-        <div class="card"><h3>1. Write tasks in markdown</h3><p>Tasks are plain <code>.md</code> files with YAML front matter. Projects are folders. Everything lives in your repo and in git.</p></div>
-        <div class="card"><h3>2. Plan on a board</h3><p>A kanban board, an AI flow board and a waterfall timeline in VS Code. Drag cards to change status.</p></div>
-        <div class="card"><h3>3. Agents work overnight</h3><p>Assign a task to <code>claude</code>, <code>codex</code> or <code>cursor</code>. The agent works on its own branch and writes progress and questions back into the task.</p></div>
-        <div class="card"><h3>4. Review in the morning</h3><p>Handed-off tasks wait in Review with a branch and pull request. Answer questions, check the work, and mark it done yourself.</p></div>
+        <div class="card"><h3>1. Write an idea</h3><p>Ideas are plain <code>.md</code> files with YAML front matter, in your repo and in git. Write what you want the way you'd prompt an agent.</p></div>
+        <div class="card"><h3>2. Approve the plan</h3><p>The agent reads your code and writes a plan with acceptance criteria. You approve it on the flow board in VS Code, or send it back.</p></div>
+        <div class="card"><h3>3. The agent executes</h3><p><code>claude</code>, <code>codex</code> or <code>cursor</code> builds approved plans one at a time, on a branch per idea, and asks when it needs an answer.</p></div>
+        <div class="card"><h3>4. Review the work</h3><p>Finished ideas wait in Review with a branch and pull request. Accept the work, or send it back with feedback.</p></div>
       </div>
-      <p>Agents never mark work done and never touch your default branch. See the <a href="https://github.com/availabooks/mdpm/blob/main/docs/agent-workflow.md">agent workflow</a> for details.</p>
+      <p>Agents never approve or accept their own work and never touch your default branch. See <a href="https://github.com/availabooks/mdpm/blob/main/docs/agent-workflow.md">the AI flow</a> for details.</p>
     </section>
 
     <section id="install">
@@ -62,13 +62,13 @@ cd mdpm
 npm install &amp;&amp; npm run build
 npm link -w @mdpm/cli
 mdpm init tasks -n "My Product"
-mdpm new "Export CSV" -o claude --template agent
-mdpm agent run</pre>
+mdpm idea "Export CSV"
+mdpm agent run --until-idle</pre>
     </section>
 
     <section>
       <h2>Private by design</h2>
-      <p>mdpm collects no data. Your tasks stay in your repo, and this site sets no cookies. See the <a href="privacy.html">privacy policy</a>.</p>
+      <p>mdpm collects no data. Your ideas stay in your repo, and this site sets no cookies. See the <a href="privacy.html">privacy policy</a>.</p>
       <p>Questions or problems? Visit the <a href="support.html">support page</a>.</p>
     </section>
   </main>
