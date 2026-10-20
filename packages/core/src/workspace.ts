@@ -54,7 +54,7 @@ export async function loadWorkspace(root: string): Promise<Workspace> {
       try {
         text = await fs.readFile(file, 'utf8');
       } catch (e) {
-        ws.issues.push({ level: 'error', code: 'fs/read-error', file, message: `Cannot read task file (${(e as Error).message}). Check that it exists and that you have permission to read it.` });
+        ws.issues.push({ level: 'error', code: 'fs/read-error', file, message: `Cannot read idea file (${(e as Error).message}). Check that it exists and that you have permission to read it.` });
         continue;
       }
     }
@@ -62,7 +62,7 @@ export async function loadWorkspace(root: string): Promise<Workspace> {
     if (!parsed) {
       // A plain markdown file (README, notes...) is only a problem if something links to it.
       for (const l of locs.filter((l) => l.link)) {
-        ws.issues.push({ level: 'warning', code: 'link/not-task', file: l.path, message: `This link points to ${file}, which is not a task because it has no front matter. Add a --- front matter block to that file, or delete this link.` });
+        ws.issues.push({ level: 'warning', code: 'link/not-task', file: l.path, message: `This link points to ${file}, which is not an idea because it has no front matter. Add a --- front matter block to that file, or delete this link.` });
       }
       continue;
     }
@@ -91,7 +91,7 @@ async function walk(dir: string, project: Project | undefined, ws: Workspace, ra
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
   } catch (e) {
-    ws.issues.push({ level: 'error', code: 'fs/read-error', file: dir, message: `Cannot read folder (${(e as Error).message}), so its tasks were skipped. Check the folder's permissions, or add its name to "ignore" in the nearest .proj.` });
+    ws.issues.push({ level: 'error', code: 'fs/read-error', file: dir, message: `Cannot read folder (${(e as Error).message}), so its ideas were skipped. Check the folder's permissions, or add its name to "ignore" in the nearest .proj.` });
     return;
   }
   entries.sort((a, b) => a.name.localeCompare(b.name));
@@ -125,7 +125,7 @@ async function walk(dir: string, project: Project | undefined, ws: Workspace, ra
           level: 'error',
           code: 'link/broken',
           file: full,
-          message: `Broken link: points to "${target}", which doesn't exist. If the task was moved or renamed, delete this link and link the task again; otherwise just delete it.`,
+          message: `Broken link: points to "${target}", which doesn't exist. If the idea was moved or renamed, delete this link and link the idea again; otherwise just delete it.`,
         });
       }
       continue;

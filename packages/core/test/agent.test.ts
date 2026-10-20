@@ -333,9 +333,13 @@ describe('agent run', () => {
     expect(sh(['branch', '--show-current'], path.join(root, '.mdpm/agent'))).toBe('idea/one');
   });
 
-  it('refuses to run an idea that waits on the person', async () => {
+  it('refuses to run an idea that waits on the person, and points out old per-task worktrees', async () => {
     await repo('process.exit(0);', { one: idea('status: plan') });
     await expect(runAgents({ root, idea: 'one', ...quiet })).rejects.toThrow(/can't work on "one" now: its plan waits for your approval/);
+    await fs.mkdir(path.join(root, '.mdpm', 'worktrees', 'old-task'), { recursive: true });
+    const logs: string[] = [];
+    await runAgents({ root, echo: false, log: (m) => logs.push(m) });
+    expect(logs[0]).toMatch(/worktrees from the task-based runner.*git worktree remove/);
   });
 
   it('stops on a usage limit, leaves the idea where it was and waits for the reset', async () => {

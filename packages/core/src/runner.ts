@@ -468,6 +468,10 @@ export async function runAgents(opts: RunOptions): Promise<RunSummary> {
     return { records: [], stopped: `${agentName} hit its usage limit; it resets at ${new Date(limit.until).toLocaleString()}. Try again then, or delete ${limitFile} to try now.` };
   }
 
+  const old = path.join(dir, 'worktrees');
+  if (existsSync(old) && (await fs.readdir(old)).length) {
+    log(`Note: ${old} holds worktrees from the task-based runner; runs now use ${path.join(dir, AGENT_WORKTREE)}. Once nothing in them is needed, remove each with "git worktree remove <path>" (see "git worktree list").`);
+  }
   const bin = opts.cli && !opts.dryRun ? await writeShims(dir, opts.cli) : undefined;
   const runs = new Map<string, number>();
   const records: RunRecord[] = [];
