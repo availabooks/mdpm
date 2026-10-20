@@ -55,26 +55,25 @@ describe('workspace', () => {
 
   beforeEach(async () => {
     root = await fs.realpath(mkdtempSync(path.join(os.tmpdir(), 'mdpm-')));
-    await createProject(root, { name: 'Root', statuses: ['todo', 'doing', 'done'] });
+    await createProject(root, { name: 'Root' });
     await createProject(path.join(root, 'web'), { name: 'Web' });
-    await createProject(path.join(root, 'api'), { name: 'API', statuses: ['open', 'closed'] });
+    await createProject(path.join(root, 'api'), { name: 'API' });
     await fs.mkdir(path.join(root, 'web', 'notes'));
     await fs.writeFile(path.join(root, 'web', 'README.md'), '# Not a task\n');
     await fs.writeFile(
       path.join(root, 'web', 'login.md'),
-      '---\ntitle: Login page\nstatus: doing\nowner: eli\nstart: 2026-10-01\nend: 2026-10-05\ntags: [ui, auth]\n---\n',
+      '---\ntitle: Login page\nstatus: executing\napproved: 2026-10-01\nbranch: idea/login\ntags: [ui, auth]\n---\n',
     );
-    await fs.writeFile(path.join(root, 'web', 'notes', 'nested.task'), '---\nstatus: todo\n---\n# Nested heading title\n');
-    await fs.writeFile(path.join(root, 'api', 'auth.md'), '---\nid: AUTH-1\nstatus: open\ndepends_on: [login, ghost]\n---\n');
+    await fs.writeFile(path.join(root, 'web', 'notes', 'nested.task'), '---\nstatus: idea\n---\n# Nested heading title\n');
+    await fs.writeFile(path.join(root, 'api', 'auth.md'), '---\nid: AUTH-1\nstatus: plan\npriority: high\n---\n');
   });
 
-  it('builds the project tree with inherited statuses', async () => {
+  it('builds the project tree', async () => {
     const ws = await loadWorkspace(root);
     expect(ws.projects.map((p) => p.id)).toEqual(['.', 'api', 'web']);
     const web = findProject(ws, 'web')!;
     expect(web.parent?.name).toBe('Root');
-    expect(web.statuses).toEqual(['todo', 'doing', 'done']);
-    expect(findProject(ws, 'API')!.statuses).toEqual(['open', 'closed']);
+    expect(findProject(ws, 'API')!.children).toEqual([]);
   });
 
   it('finds projects by id, name or folder name', async () => {
@@ -86,22 +85,24 @@ describe('workspace', () => {
     expect(findProject(ws, 'nope')).toBeUndefined();
   });
 
-  it('finds tasks, skips plain markdown, includes plain sub folders', async () => {
+  it('finds ideas, skips plain markdown, includes plain sub folders', async () => {
     const ws = await loadWorkspace(root);
     expect(ws.tasks.map((t) => t.id).sort()).toEqual(['AUTH-1', 'login', 'nested']);
     const nested = findTask(ws, 'nested')!;
     expect(nested.title).toBe('Nested heading title');
     expect(nested.home.name).toBe('Web');
     const login = findTask(ws, 'login')!;
-    expect(login).toMatchObject({ owner: 'eli', start: '2026-10-01', end: '2026-10-05', tags: ['ui', 'auth'] });
+    expect(login).toMatchObject({ status: 'executing', approved: '2026-10-01', branch: 'idea/login', tags: ['ui', 'auth'] });
   });
 
-  it('validates references', async () => {
+  it('a well-formed workspace has no issues, and a file without a status is an idea', async () => {
+    await fs.writeFile(path.join(root, 'web', 'bare.md'), '---\ntitle: Bare\n---\n');
     const ws = await loadWorkspace(root);
-    expect(ws.issues.map((i) => i.message)).toEqual([expect.stringMatching(/^depends_on lists "ghost", but no task has that id. Use/)]);
+    expect(ws.issues).toEqual([]);
+    expect(findTask(ws, 'bare')!.status).toBe('idea');
   });
 
-  it('shares a task between projects via symlink without duplicating it', async () => {
+  it('shares an idea between projects via symlink without duplicating it', async () => {
     const ws0 = await loadWorkspace(root);
     const link = await linkTask(findTask(ws0, 'login')!.file, path.join(root, 'api'));
     expect(link.kind).toEqual(process.platform === 'win32' ? expect.any(String) : 'symlink');
@@ -138,13 +139,14 @@ describe('workspace', () => {
     expect(ws.issues.some((i) => i.message.startsWith('Broken link: points to "../web/missing.md"'))).toBe(true);
   });
 
-  it('creates tasks with unique slugged names', async () => {
+  it('creates ideas with unique slugged names and the idea template', async () => {
     const dir = path.join(root, 'web');
-    const a = await createTask(dir, { title: 'Fix the Café menu!', status: 'todo', tags: ['ui'] });
+    const a = await createTask(dir, { title: 'Fix the Café menu!', tags: ['ui'] });
     const b = await createTask(dir, { title: 'Fix the Café menu!' });
     expect(path.basename(a)).toBe('fix-the-cafe-menu.md');
     expect(path.basename(b)).toBe('fix-the-cafe-menu-2.md');
     const task = findTask(await loadWorkspace(root), 'fix-the-cafe-menu')!;
-    expect(task).toMatchObject({ title: 'Fix the Café menu!', status: 'todo', tags: ['ui'] });
+    expect(task).toMatchObject({ title: 'Fix the Café menu!', status: 'idea', tags: ['ui'] });
+    for (const h of ['Idea', 'Plan', 'Acceptance criteria', 'Verification', 'Questions']) expect(task.body).toContain(`## ${h}`);
   });
 });

@@ -3,11 +3,8 @@ import * as path from 'path';
 import { buildTask, str, stringList, toPosix } from './build';
 import { parseFrontMatter, parseYamlMapping } from './frontmatter';
 import {
-  AGENT_MODES,
-  AgentMode,
   AgentSettings,
   DEFAULT_AGENT_SETTINGS,
-  DEFAULT_STATUSES,
   LinkKind,
   PROJECT_FILE,
   Project,
@@ -36,7 +33,7 @@ export function isTaskFile(name: string): boolean {
   return (TASK_EXTENSIONS as readonly string[]).includes(ext);
 }
 
-/** Scans `root` for `.proj` files and the tasks inside them. Never throws on bad content. */
+/** Scans `root` for `.proj` files and the ideas inside them. Never throws on bad content. */
 export async function loadWorkspace(root: string): Promise<Workspace> {
   root = path.resolve(root);
   const ws: Workspace = { root, projects: [], tasks: [], issues: [] };
@@ -192,9 +189,7 @@ async function loadProject(dir: string, parent: Project | undefined, ws: Workspa
   }
 
   // Invalid values fall back to the inherited ones; validateProject reports them.
-  const statuses = stringList(meta.statuses);
   const ext = meta.taskExtension === '.task' || meta.taskExtension === '.md' ? meta.taskExtension : undefined;
-  const byStatus = meta.requiredByStatus;
   const project: Project = {
     id: toPosix(path.relative(ws.root, dir)) || '.',
     name: str(meta.name) ?? path.basename(dir),
@@ -203,13 +198,7 @@ async function loadProject(dir: string, parent: Project | undefined, ws: Workspa
     meta,
     parent,
     children: [],
-    statuses: statuses.length ? [...new Set(statuses)] : parent?.statuses ?? DEFAULT_STATUSES,
     taskExtension: ext ?? parent?.taskExtension ?? ('.md' as TaskExtension),
-    required: Array.isArray(meta.required) ? stringList(meta.required) : parent?.required ?? [],
-    requiredByStatus:
-      byStatus && typeof byStatus === 'object' && !Array.isArray(byStatus)
-        ? Object.fromEntries(Object.entries(byStatus).map(([k, v]) => [k, stringList(v)]))
-        : parent?.requiredByStatus ?? {},
     agent: agentSettings(meta.agent, parent?.agent ?? DEFAULT_AGENT_SETTINGS),
     lines,
   };
@@ -224,8 +213,6 @@ function agentSettings(raw: unknown, inherited: AgentSettings): AgentSettings {
   const r = raw as Record<string, unknown>;
   const out: AgentSettings = { ...inherited };
   if (typeof r.enabled === 'boolean') out.enabled = r.enabled;
-  if (typeof r.unassigned === 'boolean') out.unassigned = r.unassigned;
-  if (Array.isArray(r.modes) && r.modes.every((m) => (AGENT_MODES as string[]).includes(m))) out.modes = r.modes as AgentMode[];
   if (Number.isInteger(r.maxTurns) && (r.maxTurns as number) > 0) out.maxTurns = r.maxTurns as number;
   if (Array.isArray(r.allowedTools) && r.allowedTools.every((t) => typeof t === 'string')) out.allowedTools = r.allowedTools as string[];
   if (typeof r.maxBudgetUsd === 'number' && r.maxBudgetUsd > 0) out.maxBudgetUsd = r.maxBudgetUsd;

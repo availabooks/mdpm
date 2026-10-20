@@ -1,9 +1,13 @@
-import { BLOCKED_STATUS, Project, Task, TaskLocation, activityVerb, ago } from '@mdpm/core';
+import { FLOW_STAGES, FLOW_STAGE_INFO, FlowStage, Project, Task, TaskLocation, activityVerb, ago, describeStatus, flowStage, isApproved } from '@mdpm/core';
 import * as vscode from 'vscode';
 import { Model } from './model';
 
-export type Node = { kind: 'project'; project: Project } | { kind: 'task'; task: Task; location: TaskLocation };
+export type Node =
+  | { kind: 'project'; project: Project }
+  | { kind: 'stage'; project: Project; stage: FlowStage }
+  | { kind: 'task'; task: Task; location: TaskLocation };
 
+/** Projects, and inside each the ideas grouped by flow stage. */
 export class ProjectTree implements vscode.TreeDataProvider<Node> {
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changed.event;
@@ -12,24 +16,29 @@ export class ProjectTree implements vscode.TreeDataProvider<Node> {
     model.onDidChange(() => this.changed.fire());
   }
 
+  private ideasIn(p: Project) {
+    return this.model.tasks.flatMap((task) => task.locations.filter((l) => l.project === p).map((location) => ({ task, location })));
+  }
+
   getChildren(node?: Node): Node[] {
     if (!node) return this.model.projects.filter((p) => !p.parent).map((project) => ({ kind: 'project', project }));
     if (node.kind === 'task') return [];
+    if (node.kind === 'stage') {
+      return this.ideasIn(node.project)
+        .filter(({ task }) => flowStage(task) === node.stage)
+        .sort((a, b) => Number(b.task.status === 'blocked') - Number(a.task.status === 'blocked') || a.task.title.localeCompare(b.task.title))
+        .map(({ task, location }) => ({ kind: 'task' as const, task, location }));
+    }
     const p = node.project;
-    const children: Node[] = p.children.map((project) => ({ kind: 'project', project }));
-    const tasks = this.model.tasks
-      .flatMap((task) => task.locations.filter((l) => l.project === p).map((location) => ({ task, location })))
-      .sort((a, b) => statusRank(a.task) - statusRank(b.task) || a.task.title.localeCompare(b.task.title));
-    return [...children, ...tasks.map(({ task, location }) => ({ kind: 'task' as const, task, location }))];
+    const ideas = this.ideasIn(p);
+    const stages = FLOW_STAGES.filter((s) => ideas.some(({ task }) => flowStage(task) === s));
+    return [...p.children.map((project) => ({ kind: 'project' as const, project })), ...stages.map((stage) => ({ kind: 'stage' as const, project: p, stage }))];
   }
 
   getTreeItem(node: Node): vscode.TreeItem {
     if (node.kind === 'project') {
       const p = node.project;
-      const item = new vscode.TreeItem(
-        p.name,
-        p.parent ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded,
-      );
+      const item = new vscode.TreeItem(p.name, p.parent ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded);
       item.id = p.file;
       item.iconPath = new vscode.ThemeIcon(p.parent ? 'folder' : 'project');
       item.contextValue = 'project';
@@ -40,23 +49,34 @@ export class ProjectTree implements vscode.TreeDataProvider<Node> {
       return item;
     }
 
+    if (node.kind === 'stage') {
+      const info = FLOW_STAGE_INFO[node.stage];
+      const ideas = this.ideasIn(node.project).filter(({ task }) => flowStage(task) === node.stage);
+      const item = new vscode.TreeItem(info.label, node.stage === 'done' ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded);
+      item.id = `${node.project.file}#${node.stage}`;
+      item.iconPath = new vscode.ThemeIcon(STAGE_ICONS[node.stage]);
+      item.description = `${ideas.length}`;
+      item.tooltip = info.hint;
+      item.contextValue = 'stage';
+      return item;
+    }
+
     const { task, location } = node;
     const item = new vscode.TreeItem(task.title, vscode.TreeItemCollapsibleState.None);
     item.id = location.path;
-    // e.g. "taskLink:blocked"; menus match the start with /^task/ and the state with /:blocked/.
+    // e.g. "ideaLink:plan-approved"; menus match the start with /^idea/ and the state after the colon.
     const running = this.model.runningOn(task);
-    const state = running ? 'running' : task.status === BLOCKED_STATUS ? 'blocked' : isFinal(task) ? 'done' : 'open';
-    item.contextValue = `${location.link ? 'taskLink' : 'task'}:${state}`;
-    item.iconPath = running ? new vscode.ThemeIcon('sync~spin', new vscode.ThemeColor('charts.purple')) : statusIcon(task);
-    const owner = task.owner && `${this.model.isAgent(task) ? '🤖 ' : '@'}${task.owner}`;
-    item.description = [task.status, running ? `${running.agent} ${activityVerb(running.mode)}…` : owner, location.link && '↪ linked'].filter(Boolean).join(' · ');
+    const state = running ? 'running' : isApproved(task) ? 'plan-approved' : task.status;
+    item.contextValue = `${location.link ? 'ideaLink' : 'idea'}:${state}`;
+    item.iconPath = running ? new vscode.ThemeIcon('sync~spin', new vscode.ThemeColor('charts.purple')) : stateIcon(task);
+    item.description = [running ? `${running.agent} ${activityVerb(running.mode)}…` : stateText(task), location.link && '↪ linked'].filter(Boolean).join(' · ');
     item.resourceUri = vscode.Uri.file(task.file);
     item.tooltip = new vscode.MarkdownString(
       [
         `**${task.title}** \`${task.id}\``,
         running ? `**${running.agent} is ${activityVerb(running.mode)}** (started ${ago(running.started)} ago)` : '',
-        `status: ${task.status}${task.owner ? ` · owner: ${task.owner}` : ''}`,
-        task.start || task.end ? `${task.start ?? '?'} → ${task.end ?? '?'}` : '',
+        describeStatus(task),
+        task.branch ? `branch: \`${task.branch}\`` : '',
         task.locations.length > 1 ? `in: ${task.locations.map((l) => l.project.name).join(', ')}` : '',
       ]
         .filter(Boolean)
@@ -67,20 +87,20 @@ export class ProjectTree implements vscode.TreeDataProvider<Node> {
   }
 }
 
-function statusRank(t: Task): number {
-  const i = t.home.statuses.indexOf(t.status);
-  return i < 0 ? 999 : i;
+const STAGE_ICONS: Record<FlowStage, string> = { idea: 'lightbulb', plan: 'checklist', executing: 'gear', review: 'eye', done: 'pass' };
+
+function stateText(t: Task): string {
+  if (t.status === 'blocked') return 'needs your answer';
+  if (t.status === 'plan') return t.approved ? 'approved' : 'awaiting approval';
+  if (t.status === 'review') return 'to review';
+  return '';
 }
 
-function isFinal(t: Task): boolean {
-  return t.status === t.home.statuses[t.home.statuses.length - 1];
-}
-
-function statusIcon(t: Task): vscode.ThemeIcon {
-  const i = t.home.statuses.indexOf(t.status);
-  const last = t.home.statuses.length - 1;
-  if (t.status === BLOCKED_STATUS) return new vscode.ThemeIcon('warning', new vscode.ThemeColor('charts.yellow'));
-  if (i === last) return new vscode.ThemeIcon('pass-filled', new vscode.ThemeColor('charts.green'));
-  if (i <= 0) return new vscode.ThemeIcon('circle-large-outline');
-  return new vscode.ThemeIcon('circle-large-filled', new vscode.ThemeColor('charts.blue'));
+function stateIcon(t: Task): vscode.ThemeIcon {
+  if (t.status === 'blocked') return new vscode.ThemeIcon('warning', new vscode.ThemeColor('charts.yellow'));
+  if (t.status === 'done') return new vscode.ThemeIcon('pass-filled', new vscode.ThemeColor('charts.green'));
+  if (t.status === 'review') return new vscode.ThemeIcon('eye', new vscode.ThemeColor('charts.orange'));
+  if (t.status === 'executing') return new vscode.ThemeIcon('circle-large-filled', new vscode.ThemeColor('charts.purple'));
+  if (t.status === 'plan') return new vscode.ThemeIcon(t.approved ? 'circle-large-filled' : 'circle-large-outline', new vscode.ThemeColor('charts.blue'));
+  return new vscode.ThemeIcon('circle-large-outline');
 }

@@ -1,29 +1,32 @@
 /** Name of the file that marks a folder as a project. */
 export const PROJECT_FILE = '.proj';
 
-/** File extensions that may contain tasks. */
+/** File extensions that may contain ideas. */
 export const TASK_EXTENSIONS = ['.md', '.task'] as const;
 export type TaskExtension = (typeof TASK_EXTENSIONS)[number];
 
-/** Kanban columns used when no `.proj` file in the chain defines `statuses`. */
-export const DEFAULT_STATUSES = ['backlog', 'todo', 'in-progress', 'blocked', 'review', 'done'];
+/**
+ * The AI flow: idea → plan → executing → review → done, plus blocked (waiting for an answer).
+ * Fixed for every project. Design: docs/agent-workflow.md.
+ */
+export const STATUSES = ['idea', 'plan', 'executing', 'blocked', 'review', 'done'] as const;
+export type Status = (typeof STATUSES)[number];
 
-/** A status with this name is shown in yellow and never picked by agents. */
 export const BLOCKED_STATUS = 'blocked';
 
-/** What an agent does with a task: continue an interrupted run, do the work, or turn an idea into a ready task. */
-export type AgentMode = 'resume' | 'implement' | 'refine';
-export const AGENT_MODES: AgentMode[] = ['resume', 'implement', 'refine'];
+/** Statuses an idea can be blocked from, and returns to when unblocked. */
+export const BLOCKABLE_STATUSES = ['idea', 'plan', 'executing'] as const;
+export type BlockableStatus = (typeof BLOCKABLE_STATUSES)[number];
+
+/** What an agent run does: turn an idea into a plan, or build an approved plan. */
+export type AgentMode = 'plan' | 'execute';
+export const AGENT_MODES: AgentMode[] = ['plan', 'execute'];
 
 /** Effective `agent:` settings of a project, after inheritance and defaults. */
 export interface AgentSettings {
-  /** Agents may work on tasks in this project. */
+  /** Agents may plan and execute ideas in this project. */
   enabled: boolean;
-  /** Agents may also pick tasks that have no owner. */
-  unassigned: boolean;
-  /** Kinds of work agents may do here. */
-  modes: AgentMode[];
-  /** Turn limit per task run. */
+  /** Turn limit per run. */
   maxTurns: number;
   /** Tools granted to the agent CLI, e.g. `Bash(npm test)`. */
   allowedTools: string[];
@@ -33,8 +36,6 @@ export interface AgentSettings {
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   enabled: true,
-  unassigned: false,
-  modes: [...AGENT_MODES],
   maxTurns: 50,
   allowedTools: ['Bash(mdpm *)', 'Bash(git status*)', 'Bash(git diff*)', 'Bash(git log*)', 'Bash(git add *)', 'Bash(git commit *)'],
 };
@@ -44,16 +45,10 @@ export interface ProjectMeta {
   name?: string;
   description?: string;
   owner?: string;
-  /** Ordered Kanban columns. Inherited by sub projects that don't define their own. */
-  statuses?: string[];
-  /** Extension used for new tasks (default `.md`). Inherited. */
+  /** Extension used for new ideas (default `.md`). Inherited. */
   taskExtension?: TaskExtension;
   /** Folder names (not globs) to skip while scanning this project. */
   ignore?: string[];
-  /** Front matter fields every task must have. Inherited. */
-  required?: string[];
-  /** Extra required fields per status, e.g. `in-progress: [owner]`. Inherited. */
-  requiredByStatus?: Record<string, string[]>;
   /** Settings for agents working in this project. Inherited key by key. */
   agent?: Partial<AgentSettings>;
   /** Agent CLI definitions (root `.proj` only). */
@@ -62,11 +57,14 @@ export interface ProjectMeta {
 }
 
 /** Keys with a meaning in `.proj`; anything else is passed through (and typo-checked). */
-export const PROJECT_FIELDS = ['name', 'description', 'owner', 'statuses', 'taskExtension', 'ignore', 'required', 'requiredByStatus', 'agent', 'agents'];
+export const PROJECT_FIELDS = ['name', 'description', 'owner', 'taskExtension', 'ignore', 'agent', 'agents'];
+/** `.proj` keys from the task-based workflow; `mdpm migrate` removes them. */
+export const OBSOLETE_PROJECT_FIELDS = ['statuses', 'required', 'requiredByStatus'];
 
-/** Keys with a meaning in task front matter (plus accepted aliases for depends_on). */
-export const TASK_FIELDS = ['id', 'title', 'status', 'owner', 'author', 'created', 'start', 'end', 'priority', 'tags', 'depends_on', 'branch', 'pr'];
-export const TASK_FIELD_ALIASES = ['dependsOn', 'depends'];
+/** Keys with a meaning in an idea's front matter. */
+export const TASK_FIELDS = ['id', 'title', 'status', 'author', 'created', 'priority', 'tags', 'approved', 'blocked_from', 'branch', 'pr', 'completed'];
+/** Front matter fields from the task-based workflow; `mdpm migrate` removes them. */
+export const OBSOLETE_TASK_FIELDS = ['owner', 'start', 'end', 'depends_on', 'dependsOn', 'depends'];
 
 export interface Project {
   /** Path of the project folder relative to the workspace root, `/`-separated (`.` for the root). */
@@ -79,14 +77,8 @@ export interface Project {
   meta: ProjectMeta;
   parent?: Project;
   children: Project[];
-  /** Effective statuses, after inheritance. */
-  statuses: string[];
-  /** Effective extension for new tasks, after inheritance. */
+  /** Effective extension for new ideas, after inheritance. */
   taskExtension: TaskExtension;
-  /** Effective `required` rule, after inheritance. */
-  required: string[];
-  /** Effective `requiredByStatus` rule, after inheritance. */
-  requiredByStatus: Record<string, string[]>;
   /** Effective `agent:` settings, after inheritance. */
   agent: AgentSettings;
   /** 1-based line of each top-level key in the `.proj` file. */
@@ -94,7 +86,7 @@ export interface Project {
 }
 
 /**
- * How a task file appears in a project folder that isn't its home.
+ * How an idea file appears in a project folder that isn't its home.
  * - `symlink`: a real filesystem symlink.
  * - `stub`: a plain text file containing a relative path. This is what git checks out
  *   on Windows when symlinks are disabled, and our fallback when we can't create one.
@@ -102,7 +94,7 @@ export interface Project {
 export type LinkKind = 'symlink' | 'stub';
 
 export interface TaskLocation {
-  /** Absolute path where the task appears (may be a link). */
+  /** Absolute path where the idea appears (may be a link). */
   path: string;
   project: Project;
   link?: LinkKind;
@@ -113,37 +105,44 @@ export interface TaskMeta {
   id?: string;
   title?: string;
   status?: string;
-  owner?: string;
   author?: string;
   created?: string;
-  start?: string;
-  end?: string;
   priority?: string | number;
   tags?: string[];
-  depends_on?: string[];
-  /** Branch holding the work, recorded by `mdpm handoff`. */
+  /** Date the person approved the plan (`mdpm approve`); absent while the plan waits for them. */
+  approved?: string;
+  /** While blocked: the status the idea returns to when unblocked. */
+  blocked_from?: string;
+  /** Branch holding the work (`idea/<id>`), set when execution starts. */
   branch?: string;
   /** Pull request URL, recorded by `mdpm handoff` or the runner. */
   pr?: string;
+  /** Date the idea was accepted (moved to done). */
+  completed?: string;
   [key: string]: unknown;
 }
 
+/**
+ * An idea: one markdown file moving through the flow. (Called a task in the code, where the
+ * name is shared with the file-level machinery: scanning, links, validation.)
+ */
 export interface Task {
   /** `id` from front matter, else the file name without extension. */
   id: string;
   title: string;
   status: string;
-  owner?: string;
   author?: string;
   created?: string;
-  start?: string;
-  end?: string;
   priority?: string | number;
   tags: string[];
-  dependsOn: string[];
-  /** Canonical (real) path of the task file. Always write here. */
+  approved?: string;
+  blockedFrom?: string;
+  branch?: string;
+  pr?: string;
+  completed?: string;
+  /** Canonical (real) path of the file. Always write here. */
   file: string;
-  /** Every place the task appears, the home location first. */
+  /** Every place the idea appears, the home location first. */
   locations: TaskLocation[];
   /** Project that owns the real file (or the first project linking to it). */
   home: Project;
@@ -169,7 +168,7 @@ export interface Workspace {
   root: string;
   /** All projects, depth first. */
   projects: Project[];
-  /** Unique tasks; a task linked into several projects appears once. */
+  /** Unique ideas; an idea linked into several projects appears once. */
   tasks: Task[];
   issues: Issue[];
 }

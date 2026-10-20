@@ -3,17 +3,18 @@ import { existsSync, promises as fs, renameSync, unlinkSync, writeFileSync } fro
 import * as path from 'path';
 
 /*
- * Which tasks an agent is working on right now. The runner (and interactive sessions) write a
+ * Which idea an agent is working on right now. The runner (and interactive sessions) write a
  * small marker file under `.mdpm/active/` and refresh it every few seconds; the views read the
  * markers. A marker only counts while its process is alive and its heartbeat is recent, so a run
- * that crashed or was killed stops showing as active on its own.
+ * that crashed or was killed stops showing as active on its own. Only one run happens at a time
+ * in a workspace, so a live marker is also the runner's lock.
  */
 
 /** What the agent is doing for the person. */
-export type ActivityMode = 'refine' | 'implement' | 'resume' | 'chat';
+export type ActivityMode = 'plan' | 'execute' | 'chat';
 
 export interface ActiveRun {
-  /** Task id. */
+  /** Idea id. */
   task: string;
   agent: string;
   mode: ActivityMode;
@@ -31,9 +32,9 @@ export interface ActiveRun {
 export const HEARTBEAT_MS = 10_000;
 export const STALE_MS = 60_000;
 
-/** Short phrase for the badge: "refining", "implementing"… */
+/** Short phrase for the badge: "planning", "executing"… */
 export function activityVerb(mode: ActivityMode): string {
-  return { refine: 'refining', implement: 'implementing', resume: 'resuming work', chat: 'in a chat with you' }[mode];
+  return { plan: 'planning', execute: 'executing', chat: 'in a chat with you' }[mode] ?? 'working on';
 }
 
 /** `3m`, `45s`, `1h 5m`: how long ago `iso` was. */
@@ -50,7 +51,7 @@ export function activeDir(stateDir: string): string {
 }
 
 function markerFile(stateDir: string, task: string): string {
-  const safe = task.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 100) || 'task';
+  const safe = task.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 100) || 'idea';
   return path.join(activeDir(stateDir), `${safe}.json`);
 }
 
@@ -69,7 +70,7 @@ export interface ActiveHandle {
 }
 
 /**
- * Marks `task` as being worked on until `stop()` is called, the process exits, or it is killed by a
+ * Marks the idea `task` as being worked on until `stop()` is called, the process exits, or it is killed by a
  * signal (INT/TERM/HUP), and keeps the marker fresh meanwhile.
  */
 export async function markActive(stateDir: string, info: Omit<ActiveRun, 'pid' | 'started' | 'updated'>): Promise<ActiveHandle> {
