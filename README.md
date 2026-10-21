@@ -142,7 +142,7 @@ Windows, macOS and Linux either way.
 ### Coming from the task-based mdpm
 
 `mdpm migrate` shows how a task-based workspace maps onto the flow, and `mdpm migrate --write`
-applies it: `backlog`/`todo` become ideas or plans (plans queued for an agent are approved),
+applies it: `backlog` becomes an idea, `todo` a plan if it has acceptance criteria (approved if it was queued for an agent),
 `in-progress` becomes `executing` (one keeps the slot; others become approved plans), `blocked`
 gets its `blocked_from`, and `done` keeps its date as `completed`. `owner`, `start`, `end`,
 `depends_on`, custom `statuses` and the `required…` rules are removed, and `## Agent log` /

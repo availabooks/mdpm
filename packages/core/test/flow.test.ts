@@ -303,7 +303,7 @@ describe('mdpm migrate', () => {
 
     const plan = planMigration(await loadWorkspace(root), { branchExists: (b) => b === 'agent/first' });
     const to = Object.fromEntries(plan.ideas.map((i) => [i.id, i.to]));
-    expect(to).toEqual({ raw: 'idea', specced: 'plan', mine: 'plan', queued: 'plan', first: 'executing', second: 'plan', asked: 'blocked', refined: 'plan', shipped: 'done' });
+    expect(to).toEqual({ raw: 'idea', specced: 'idea', mine: 'plan', queued: 'plan', first: 'executing', second: 'plan', asked: 'blocked', refined: 'plan', shipped: 'done' });
     expect(plan.projects.map((p) => [path.relative(root, p.file), p.removed])).toEqual([
       ['.proj', ['statuses', 'requiredByStatus', 'agent.unassigned']],
       [path.join('sub', '.proj'), ['agent.modes']],

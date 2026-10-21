@@ -126,7 +126,8 @@ export function planMigration(ws: Workspace, opts: MigrateOptions = {}): Migrati
         notes.push(`was queued for ${owner}, so its plan is approved`);
       }
     } else if (status === 'backlog' || status === statuses[0]) {
-      to = complete ? 'plan' : 'idea';
+      // Backlog was never refined or queued, whatever criteria it has: the agent plans it.
+      to = 'idea';
     } else if (isStatus(status)) {
       to = status;
     }

@@ -1,6 +1,6 @@
 ---
 title: Agent claim and lock protocol
-status: plan
+status: idea
 author: Elijah Allen
 created: 2026-10-19
 tags:
@@ -20,3 +20,8 @@ Make claims safe when several agents run at once, on different machines or in th
 - [ ] Stale claims (no log entry for a configurable time) can be taken over, with a log entry saying so
 - [ ] Works with Claude Code routines (they clone the default branch and push `claude/…` branches)
 - [ ] Documented, with tests for the conflict cases
+
+## Log
+
+- 2026-10-21 05:34 Elijah Allen — moved from plan to idea
+- 2026-10-21 05:34 Elijah Allen — was backlog before the flow; migrated back to idea so the agent plans it

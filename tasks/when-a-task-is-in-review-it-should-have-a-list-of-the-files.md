@@ -1,6 +1,6 @@
 ---
 title: When a task is in review, it should have a list of the files that were effected for that task
-status: plan
+status: idea
 author: Elijah Allen
 created: 2026-10-19
 ---
@@ -30,3 +30,8 @@ tests
 ## Questions
 
 <!-- Open questions, as "- [ ] …". Agents add theirs here when they block. -->
+
+## Log
+
+- 2026-10-21 05:34 Elijah Allen — moved from plan to idea
+- 2026-10-21 05:34 Elijah Allen — was backlog before the flow; migrated back to idea so the agent plans it

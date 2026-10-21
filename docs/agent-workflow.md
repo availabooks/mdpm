@@ -202,8 +202,9 @@ Status mapping:
 
 | Old | New |
 |---|---|
-| `backlog` without criteria | `idea` |
-| `backlog` with criteria, or `todo` without an agent owner | `plan`, unapproved |
+| `backlog` | `idea` (it was never refined, so the agent plans it) |
+| `todo` with criteria, without an agent owner | `plan`, unapproved |
+| `todo` without criteria | `idea` |
 | `todo` owned by an agent | `plan`, approved |
 | `in-progress` | `executing`. If there are several, the oldest one; the rest become approved `plan`, and the report lists them. |
 | `blocked` | `blocked`, with `blocked_from` = `executing` if `start` was set, else `plan` if it had criteria, else `idea` |

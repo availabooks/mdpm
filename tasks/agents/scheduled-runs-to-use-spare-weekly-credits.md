@@ -1,6 +1,6 @@
 ---
 title: Scheduled runs to use spare weekly credits
-status: plan
+status: idea
 author: Elijah Allen
 created: 2026-10-19
 tags:
@@ -30,3 +30,8 @@ Use subscription usage that would otherwise expire, without getting in the way o
 - On macOS: `mdpm agent schedule install`, then check `launchctl list | grep mdpm` and `mdpm agent schedule status`. Remove it again with `uninstall`.
 
 ## Questions
+
+## Log
+
+- 2026-10-21 05:34 Elijah Allen — moved from plan to idea
+- 2026-10-21 05:34 Elijah Allen — was backlog before the flow; migrated back to idea so the agent plans it
