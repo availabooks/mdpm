@@ -3,16 +3,14 @@ title: Build Support Website for This
 status: done
 author: Elijah Allen
 created: 2026-10-19
-owner: claude
-start: 2026-10-19
 branch: agent/build-support-website-for-this
 pr: https://github.com/availabooks/mdpm/pull/3
-end: 2026-10-19
+completed: 2026-10-19
 ---
 
 # Build Support Website for This
 
-## Goal
+## Idea
 
 Build the support website and Publish our tool to the public, this way it can be included in the vscode extensions market.
 
@@ -75,7 +73,7 @@ There is no site directory yet, and nothing in the repo shows an existing Cloudf
 - [ ] (claude, 2026-10-19) I scoped this to building the site in site/ and updating the extension homepage metadata; publishing the extension to the Marketplace is a separate task. Is that right? If so, please review this refinement and move it to todo.
     - looks great to me!
 
-## Agent log
+## Log
 
 - 2026-10-19 14:21 claude — claimed (run r-20261019-142132-hbg3)
 - 2026-10-19 14:21 Elijah Allen — started an interactive claude session on this task

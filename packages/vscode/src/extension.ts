@@ -1,34 +1,32 @@
 import {
-  BLOCKED_STATUS,
   Project,
-  QUESTIONS_HEADING,
-  TaskTemplate,
   Task,
+  Workspace,
+  activityVerb,
+  ago,
   createProject,
   createTask,
   defaultAuthor,
-  isFinalStatus,
+  ideaBody,
+  isApproved,
   linkTask,
   modeFor,
   newTaskMeta,
   nextTaskPath,
   previewNewTask,
+  slotHolder,
   slugify,
-  taskBody,
-  activityVerb,
-  ago,
-  today,
   unlinkTask,
 } from '@mdpm/core';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { setOwner, setStatus } from './bulk';
+import * as flow from './flow';
 import { Model } from './model';
-import { ViewPanel } from './panel';
+import { BoardPanel } from './panel';
 import { Node, ProjectTree } from './tree';
 
 /** Arguments a command may receive: a tree node, a webview request, a file (editor title), or nothing (palette). */
-type CommandArg = Node | { projectKey?: string; status?: string } | { taskFile: string } | vscode.Uri | undefined;
+type CommandArg = Node | { projectKey?: string } | { taskFile: string } | vscode.Uri | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
   const model = new Model();
@@ -37,12 +35,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
   const projectOf = (arg: CommandArg): Project | undefined => {
     if (arg instanceof vscode.Uri) return undefined;
-    if (arg && 'kind' in arg) return arg.kind === 'project' ? arg.project : arg.location.project;
+    if (arg && 'kind' in arg) return arg.kind === 'task' ? arg.location.project : arg.project;
     if (arg && 'projectKey' in arg && arg.projectKey) return model.project(arg.projectKey);
     return undefined;
   };
 
-  /** The task a command targets: tree node, else the task open in the active editor. */
+  /** The idea a command targets: tree node, else the idea open in the active editor. */
   const taskOf = (arg: CommandArg): Task | undefined => {
     if (arg instanceof vscode.Uri) return model.task(arg.fsPath);
     if (arg && 'taskFile' in arg) return model.task(arg.taskFile);
@@ -62,101 +60,17 @@ export async function activate(context: vscode.ExtensionContext) {
   const requireTask = (arg: CommandArg): Task | undefined => {
     const task = taskOf(arg);
     if (!task) {
-      vscode.window.showWarningMessage(
-        'mdpm: no task selected. Right-click a task in the mdpm Projects view, or open a task file in the editor, then run this command again.',
-      );
+      vscode.window.showWarningMessage('mdpm: no idea selected. Right-click an idea in the mdpm Projects view, or open an idea file in the editor, then run this command again.');
     }
     return task;
   };
 
-  /** Runs `mdpm agent run --task <id>` with the bundled CLI in a terminal, so the run is visible and can be stopped. */
-  const sendToAgent = async (task: Task, agent: string) => {
-    const ws = model.workspaceOf(task);
-    if (!ws) return;
-    const busy = model.runningOn(task);
-    if (busy) {
-      vscode.window.showWarningMessage(`mdpm: ${busy.agent} is already ${activityVerb(busy.mode)} "${task.title}" (started ${ago(busy.started)} ago). Wait for it to finish, or stop its terminal first.`);
-      return;
-    }
-    if (!modeFor(task)) {
-      const hint = task.status === BLOCKED_STATUS ? ' Answer its questions and use "Unblock" first.' : ' Move it back to todo first if it needs more work.';
-      vscode.window.showWarningMessage(`mdpm: "${task.title}" is ${task.status}; agents only work on backlog, todo and in-progress tasks.${hint}`);
-      return;
-    }
-    const cli = vscode.Uri.joinPath(context.extensionUri, 'dist', 'mdpm.js').fsPath;
-    const terminal = vscode.window.createTerminal({
-      name: `mdpm · ${agent} · ${task.id}`,
-      // VS Code's own runtime acts as node, so nothing has to be installed or on PATH; no shell is involved.
-      shellPath: process.execPath,
-      shellArgs: [cli, '--root', ws.root, 'agent', 'run', '--task', task.id, '--agent', agent],
-      cwd: ws.root,
-      env: { ELECTRON_RUN_AS_NODE: '1', MDPM_AGENT: null },
-      iconPath: new vscode.ThemeIcon('hubot'),
-    });
-    terminal.show();
-  };
-
   /**
-   * Opens a terminal talking to the agent that worked on the task: `mdpm agent continue` reopens its
-   * conversation in the task's worktree (recreating the worktree after a handoff), so you can give it
-   * more directions. Runs the bundled CLI, interactively, so permission prompts come to you.
-   */
-  const continueWithAgent = async (task: Task) => {
-    const ws = model.workspaceOf(task);
-    if (!ws) return;
-    const busy = model.runningOn(task);
-    if (busy) {
-      vscode.window.showWarningMessage(`mdpm: ${busy.agent} is ${activityVerb(busy.mode)} "${task.title}" right now (started ${ago(busy.started)} ago). Open another conversation once it finishes, or stop its terminal first.`);
-      return;
-    }
-    const cli = vscode.Uri.joinPath(context.extensionUri, 'dist', 'mdpm.js').fsPath;
-    const terminal = vscode.window.createTerminal({
-      name: `mdpm · chat · ${task.id}`,
-      shellPath: process.execPath,
-      shellArgs: [cli, '--root', ws.root, 'agent', 'continue', task.id],
-      cwd: ws.root,
-      env: { ELECTRON_RUN_AS_NODE: '1', MDPM_AGENT: null },
-      iconPath: new vscode.ThemeIcon('comment-discussion'),
-    });
-    terminal.show();
-  };
-
-  const pickAgent = async (placeHolder: string): Promise<string | undefined> => {
-    const agents = model.agents();
-    const def = model.defaultAgent();
-    const items = agents.map((a) => ({ label: `$(hubot) ${a}`, description: a === def ? 'default (mdpm.agent.default)' : undefined, agent: a }));
-    return (await vscode.window.showQuickPick(items, { placeHolder }))?.agent;
-  };
-
-  // Status bar: how many agents are working, and a way to see them.
-  const working = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
-  working.command = 'mdpm.openBoard';
-  context.subscriptions.push(working);
-  const updateWorking = () => {
-    const runs = model.active;
-    if (!runs.length) return working.hide();
-    working.text = `$(sync~spin) ${runs.length === 1 ? `${runs[0].agent} ${activityVerb(runs[0].mode)}` : `${runs.length} agents working`}`;
-    working.tooltip = new vscode.MarkdownString(runs.map((r) => `**${r.task}**: ${r.agent} ${activityVerb(r.mode)} · ${ago(r.started)}`).join('\n\n'));
-    working.show();
-  };
-  context.subscriptions.push(model.onDidChange(updateWorking));
-
-  /** Keeps the editor title buttons in step with the task in the active editor. */
-  const updateContext = () => {
-    const doc = vscode.window.activeTextEditor?.document;
-    const task = doc ? model.task(doc.uri.fsPath) : undefined;
-    vscode.commands.executeCommand('setContext', 'mdpm.activeTask', !!task);
-    vscode.commands.executeCommand('setContext', 'mdpm.activeTaskBlocked', !!task && model.isBlocked(task));
-  };
-  context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(updateContext), model.onDidChange(updateContext));
-
-
-  /**
-   * The tasks a command targets: every task selected in the tree when the clicked node is
-   * part of a multi-selection (project nodes are ignored), else the single task.
+   * The ideas a command targets: every idea selected in the tree when the clicked node is part
+   * of a multi-selection (other nodes are ignored), else the single idea.
    */
   const requireTasks = (arg: CommandArg, selected?: Node[]): Task[] => {
-    const id = (n: Node) => (n.kind === 'project' ? n.project.file : n.location.path);
+    const id = (n: Node) => (n.kind === 'task' ? n.location.path : n.kind === 'stage' ? `${n.project.file}#${n.stage}` : n.project.file);
     const clicked = arg && 'kind' in arg ? id(arg) : undefined;
     if (clicked && selected && selected.length > 1 && selected.some((n) => id(n) === clicked)) {
       const tasks = selected.flatMap((n) => (n.kind === 'task' ? [n.task] : []));
@@ -166,6 +80,98 @@ export async function activate(context: vscode.ExtensionContext) {
     return task ? [task] : [];
   };
 
+  /** Runs the bundled CLI in a terminal (no shell, nothing on PATH needed), so a run is visible and can be stopped. */
+  const cliTerminal = (ws: Workspace, name: string, icon: string, args: string[]) => {
+    const cli = vscode.Uri.joinPath(context.extensionUri, 'dist', 'mdpm.js').fsPath;
+    const terminal = vscode.window.createTerminal({
+      name,
+      // VS Code's own runtime acts as node, so nothing has to be installed or on PATH; no shell is involved.
+      shellPath: process.execPath,
+      shellArgs: [cli, '--root', ws.root, ...args],
+      cwd: ws.root,
+      env: { ELECTRON_RUN_AS_NODE: '1', MDPM_AGENT: null },
+      iconPath: new vscode.ThemeIcon(icon),
+    });
+    terminal.show();
+  };
+
+  /** Refuses to start a second run: one at a time per workspace. */
+  const busy = (): boolean => {
+    const r = model.active[0];
+    if (!r) return false;
+    vscode.window.showWarningMessage(`mdpm: ${r.agent} is ${activityVerb(r.mode)} "${r.task}" (started ${ago(r.started)} ago), and only one run happens at a time. Wait for it to finish, or stop its terminal first.`);
+    return true;
+  };
+
+  /** Plans an idea now, or executes it if it is the approved plan whose turn it is. */
+  const planNow = async (task: Task) => {
+    const ws = model.workspaceOf(task);
+    if (!ws || busy()) return;
+    const how = modeFor(ws, task);
+    if ('reason' in how) {
+      vscode.window.showWarningMessage(`mdpm: the agent can't work on "${task.title}" now: ${how.reason}`);
+      return;
+    }
+    const agent = model.defaultAgent();
+    cliTerminal(ws, `mdpm · ${agent} · ${task.id}`, 'hubot', ['agent', 'run', '--idea', task.id, '--agent', agent]);
+  };
+
+  /** Runs the agent on whatever is next in the flow (`--until-idle` keeps going). */
+  const runNext = async (untilIdle: boolean) => {
+    if (busy()) return;
+    const ws =
+      model.workspaces.length === 1
+        ? model.workspaces[0]
+        : (await vscode.window.showQuickPick(model.workspaces.map((w) => ({ label: path.basename(w.root), description: w.root, ws: w })), { placeHolder: 'Run the agent in…' }))?.ws;
+    if (!ws) return;
+    const agent = model.defaultAgent();
+    cliTerminal(ws, `mdpm · ${agent} · flow`, 'hubot', ['agent', 'run', '--agent', agent, ...(untilIdle ? ['--until-idle'] : [])]);
+  };
+
+  /**
+   * Opens a terminal talking to the agent about an idea: `mdpm agent continue` reopens its last run
+   * on the idea (or starts a conversation from the idea) in the agent worktree, on the idea's branch.
+   * Interactive, so permission prompts come to you.
+   */
+  const continueWithAgent = async (task: Task) => {
+    const ws = model.workspaceOf(task);
+    if (!ws || busy()) return;
+    cliTerminal(ws, `mdpm · chat · ${task.id}`, 'comment-discussion', ['agent', 'continue', task.id]);
+  };
+
+  // Status bar: what the agent is doing, else what holds the execution slot.
+  const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
+  status.command = 'mdpm.openBoard';
+  context.subscriptions.push(status);
+  const updateStatus = () => {
+    const run = model.active[0];
+    const slot = model.workspaces.map(slotHolder).find(Boolean);
+    const waiting = model.toDTO().tasks.filter((t) => t.needsYou).length;
+    if (!run && !slot && !waiting) return status.hide();
+    status.text = run ? `$(sync~spin) ${run.agent} ${activityVerb(run.mode)} ${run.task}` : slot ? `$(gear) ${slot.status === 'blocked' ? '⚠ ' : ''}${slot.id}` : '$(lightbulb) mdpm';
+    if (waiting) status.text += ` · ${waiting} waiting on you`;
+    status.tooltip = new vscode.MarkdownString(
+      [
+        run ? `**${run.agent}** is ${activityVerb(run.mode)} **${run.task}** · ${ago(run.started)}` : 'No agent is working right now.',
+        slot ? `Execution slot: **${slot.id}** (${slot.status})` : 'Execution slot: free',
+        waiting ? `${waiting} waiting on you` : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+    );
+    status.show();
+  };
+  context.subscriptions.push(model.onDidChange(updateStatus));
+
+  /** Keeps the editor title buttons in step with the idea in the active editor. */
+  const updateContext = () => {
+    const doc = vscode.window.activeTextEditor?.document;
+    const task = doc ? model.task(doc.uri.fsPath) : undefined;
+    vscode.commands.executeCommand('setContext', 'mdpm.activeTask', !!task);
+    vscode.commands.executeCommand('setContext', 'mdpm.activeTaskState', task ? (isApproved(task) ? 'plan-approved' : task.status) : '');
+  };
+  context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(updateContext), model.onDidChange(updateContext));
+
   const run = (fn: (arg: CommandArg, selected?: Node[]) => Promise<unknown>) => async (arg: CommandArg, selected?: unknown) => {
     try {
       await fn(arg, Array.isArray(selected) ? selected : undefined);
@@ -174,40 +180,35 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   };
 
+  const one = (fn: (task: Task) => Promise<unknown>) => async (arg: CommandArg) => {
+    const task = requireTask(arg);
+    if (task) await fn(task);
+  };
+
   const commands: Record<string, (arg: CommandArg, selected?: Node[]) => Promise<unknown>> = {
     'mdpm.refresh': () => model.reload(),
 
-    'mdpm.openBoard': async (arg) => ViewPanel.show('board', context.extensionUri, model, projectOf(arg)?.file),
+    'mdpm.openBoard': async (arg) => BoardPanel.show(context.extensionUri, model, projectOf(arg)?.file),
 
-    'mdpm.openFlow': async (arg) => ViewPanel.show('flow', context.extensionUri, model, projectOf(arg)?.file),
-
-    'mdpm.openWaterfall': async (arg) => ViewPanel.show('waterfall', context.extensionUri, model, projectOf(arg)?.file),
-
-    'mdpm.newTask': async (arg) => {
+    'mdpm.newIdea': async (arg) => {
       if (!model.projects.length) {
         const create = await vscode.window.showInformationMessage(
-          'mdpm: there are no projects yet, so there is nowhere to put the task. A project is any folder containing a .proj file; create one first.',
+          'mdpm: there are no projects yet, so there is nowhere to put the idea. A project is any folder containing a .proj file; create one first.',
           'Create Project',
         );
         if (create) await vscode.commands.executeCommand('mdpm.newProject');
         return;
       }
-      const project = projectOf(arg) ?? (await pickProject('Project for the new task'));
+      const project = projectOf(arg) ?? (await pickProject('Project for the new idea'));
       if (!project) return;
-      const title = await vscode.window.showInputBox({ prompt: `New task in ${project.name}`, placeHolder: 'Task title' });
+      const title = await vscode.window.showInputBox({ prompt: `New idea in ${project.name}`, placeHolder: 'What do you want built? (a short title)' });
       if (!title?.trim()) return;
-      const status = arg && 'status' in arg && arg.status ? arg.status : project.statuses[0];
-      const owner = vscode.workspace.getConfiguration('mdpm').get<string>('defaultOwner') || undefined;
-      const end = isFinalStatus(project, status) ? today() : undefined;
-      const template = vscode.workspace.getConfiguration('mdpm').get<TaskTemplate>('taskTemplate') === 'default' ? 'default' : 'agent';
-      const task = { title: title.trim(), status, owner, author: defaultAuthor(project.dir), end, body: taskBody(title.trim(), template) };
+      const task = { title: title.trim(), status: 'idea', author: defaultAuthor(project.dir), body: ideaBody(title.trim()) };
       const ws = model.workspaces.find((w) => w.projects.includes(project));
-      const errors = ws
-        ? previewNewTask(ws, project, nextTaskPath(project.dir, task.title, project.taskExtension), newTaskMeta(task)).filter((i) => i.level === 'error')
-        : [];
+      const errors = ws ? previewNewTask(ws, project, nextTaskPath(project.dir, task.title, project.taskExtension), newTaskMeta(task)).filter((i) => i.level === 'error') : [];
       if (errors.length) {
         const choice = await vscode.window.showErrorMessage(
-          `mdpm: a task "${task.title}" in ${project.name} would be invalid, so it was not created.`,
+          `mdpm: an idea "${task.title}" in ${project.name} would be invalid, so it was not created.`,
           { modal: true, detail: errors.map((i) => `• ${i.message}`).join('\n') + '\n\nYou can create it anyway and fix the front matter afterwards.' },
           'Create Anyway',
         );
@@ -215,7 +216,11 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       const file = await createTask(project.dir, task, project.taskExtension);
       await model.reload();
-      await vscode.window.showTextDocument(vscode.Uri.file(file));
+      // Put the cursor under "## Idea", where the person writes.
+      const doc = await vscode.workspace.openTextDocument(file);
+      const line = doc.getText().split(/\r?\n/).findIndex((l) => /^##\s+Idea\s*$/i.test(l));
+      const at = new vscode.Position(Math.max(0, line + 2), 0);
+      await vscode.window.showTextDocument(doc, { selection: new vscode.Range(at, at) });
     },
 
     'mdpm.newProject': async (arg) => {
@@ -238,17 +243,14 @@ export async function activate(context: vscode.ExtensionContext) {
         const folder = vscode.workspace.workspaceFolders?.[0];
         if (!folder) {
           const open = await vscode.window.showErrorMessage(
-            'mdpm: no folder is open, so there is nowhere to create the project. Open the folder or repository you want to keep tasks in, then run "mdpm: New Project" again.',
+            'mdpm: no folder is open, so there is nowhere to create the project. Open the folder or repository you want to keep ideas in, then run "mdpm: New Project" again.',
             'Open Folder…',
           );
           if (open) await vscode.commands.executeCommand('workbench.action.files.openFolder');
           return;
         }
         const sub = vscode.workspace.getConfiguration('mdpm').get<string>('root') || '';
-        const rel = await vscode.window.showInputBox({
-          prompt: 'Folder for the project, relative to the workspace',
-          value: model.projects.length ? path.join(sub, slugify(name)) : sub || 'tasks',
-        });
+        const rel = await vscode.window.showInputBox({ prompt: 'Folder for the project, relative to the workspace', value: model.projects.length ? path.join(sub, slugify(name)) : sub || 'tasks' });
         if (rel === undefined) return;
         dir = path.join(folder.uri.fsPath, rel);
       }
@@ -257,9 +259,23 @@ export async function activate(context: vscode.ExtensionContext) {
       await vscode.window.showTextDocument(vscode.Uri.file(file));
     },
 
-    'mdpm.setStatus': async (arg, selected) => setStatus(model, requireTasks(arg, selected)),
+    'mdpm.approve': async (arg, selected) => flow.approve(model, requireTasks(arg, selected)),
+    'mdpm.accept': async (arg, selected) => flow.accept(model, requireTasks(arg, selected)),
+    'mdpm.rework': one((t) => flow.rework(model, t)),
+    'mdpm.unblock': one((t) => flow.unblock(model, t)),
+    'mdpm.replan': one((t) => flow.replan(model, t)),
+    'mdpm.moveBackToPlan': one((t) => flow.pause(model, t)),
+    'mdpm.planNow': one(planNow),
+    'mdpm.runNext': () => runNext(false),
+    'mdpm.runUntilIdle': () => runNext(true),
+    'mdpm.continueWithAgent': one(continueWithAgent),
 
-    'mdpm.setOwner': async (arg, selected) => setOwner(model, requireTasks(arg, selected)),
+    'mdpm.openPr': one(async (task) => {
+      if (task.pr) return vscode.env.openExternal(vscode.Uri.parse(task.pr));
+      vscode.window.showInformationMessage(
+        `mdpm: "${task.title}" has no pull request${task.branch ? `; its work is on branch ${task.branch}. Check it out to review it (git switch ${task.branch}), or install and log in to the GitHub CLI (gh auth login) to get pull requests on handoff.` : '.'}`,
+      );
+    }),
 
     'mdpm.linkTask': async (arg) => {
       const task = requireTask(arg);
@@ -270,71 +286,20 @@ export async function activate(context: vscode.ExtensionContext) {
       await model.reload();
       if (link.kind === 'stub') {
         const help = await vscode.window.showWarningMessage(
-          'mdpm: the task was linked, but this machine does not allow symlinks, so a small text file holding the path was written instead. ' +
+          'mdpm: the idea was linked, but this machine does not allow symlinks, so a small text file holding the path was written instead. ' +
             'mdpm treats it the same way. To get real symlinks, enable Windows Developer Mode and run "git config core.symlinks true".',
           'How to Enable Developer Mode',
         );
-        if (help) {
-          await vscode.env.openExternal(vscode.Uri.parse('https://learn.microsoft.com/windows/apps/get-started/enable-your-device-for-development'));
-        }
+        if (help) await vscode.env.openExternal(vscode.Uri.parse('https://learn.microsoft.com/windows/apps/get-started/enable-your-device-for-development'));
       }
     },
 
     'mdpm.unlinkTask': async (arg) => {
       if (!arg || !('kind' in arg) || arg.kind !== 'task' || !arg.location.link) return;
-      const ok = await vscode.window.showWarningMessage(
-        `Remove "${arg.task.title}" from ${arg.location.project.name}? The task itself stays in ${arg.task.home.name}.`,
-        { modal: true },
-        'Remove',
-      );
+      const ok = await vscode.window.showWarningMessage(`Remove "${arg.task.title}" from ${arg.location.project.name}? The idea itself stays in ${arg.task.home.name}.`, { modal: true }, 'Remove');
       if (!ok) return;
       await unlinkTask(arg.location.path);
       await model.reload();
-    },
-
-    'mdpm.sendToAgent': async (arg) => {
-      const task = requireTask(arg);
-      if (task) await sendToAgent(task, model.defaultAgent());
-    },
-
-    'mdpm.sendToAgentAs': async (arg) => {
-      const task = requireTask(arg);
-      if (!task) return;
-      const agent = await pickAgent(`Send "${task.title}" to…`);
-      if (agent) await sendToAgent(task, agent);
-    },
-
-    'mdpm.continueWithAgent': async (arg) => {
-      const task = requireTask(arg);
-      if (task) await continueWithAgent(task);
-    },
-
-    'mdpm.queueForAgent': async (arg) => {
-      const task = requireTask(arg);
-      if (!task) return;
-      const agent = await pickAgent(`Queue "${task.title}" for… (the next "mdpm agent run" picks it up)`);
-      if (!agent || agent === task.owner) return;
-      await model.update(task, { owner: agent }, { text: `queued for ${agent}`, by: defaultAuthor(task.home.dir) });
-    },
-
-    'mdpm.unblock': async (arg) => {
-      const task = requireTask(arg);
-      if (!task) return;
-      if (!model.isBlocked(task)) {
-        vscode.window.showInformationMessage(`mdpm: "${task.title}" is ${task.status}, not blocked, so there is nothing to unblock.`);
-        return;
-      }
-      const doc = await vscode.workspace.openTextDocument(task.file);
-      const line = doc.getText().split(/\r?\n/).findIndex((l) => new RegExp(`^##\\s+${QUESTIONS_HEADING}\\s*$`, 'i').test(l));
-      const at = new vscode.Position(Math.max(0, line), 0);
-      await vscode.window.showTextDocument(doc, { selection: new vscode.Range(at, at), preview: false });
-      const target = task.home.statuses.includes('todo') ? 'todo' : task.home.statuses[0];
-      const saved = await model.update(task, { status: target }, { text: `unblocked; moved back to ${target}`, by: defaultAuthor(task.home.dir) });
-      if (saved) {
-        vscode.window.showInformationMessage(
-          `mdpm: "${task.title}" is back in ${target}. Answer the questions inline (tick them or write below them); ${task.owner ?? 'the agent'} reads them on its next run.`,
-        );
-      }
     },
 
     'mdpm.openProjectFile': async (arg) => {
@@ -343,7 +308,7 @@ export async function activate(context: vscode.ExtensionContext) {
     },
 
     'mdpm.revealInExplorer': async (arg) => {
-      if (!arg || !('kind' in arg)) return;
+      if (!arg || !('kind' in arg) || arg.kind === 'stage') return;
       const target = arg.kind === 'project' ? arg.project.dir : arg.location.path;
       await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(target));
     },
@@ -353,7 +318,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   await model.reload();
   updateContext();
-  updateWorking();
+  updateStatus();
 }
 
 export function deactivate() {}

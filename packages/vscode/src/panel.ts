@@ -1,50 +1,55 @@
 import * as crypto from 'crypto';
-import { FLOW_STAGE_INFO, FlowStage, statusForStage } from '@mdpm/core';
+import { FlowStage, Task } from '@mdpm/core';
 import * as vscode from 'vscode';
-import { Task } from '@mdpm/core';
-import { setOwner, setStatus } from './bulk';
+import * as flow from './flow';
 import { Model } from './model';
 
-export type PanelKind = 'board' | 'flow' | 'waterfall';
+/** Card and toolbar buttons on the board; each runs the extension command of the same name. */
+export type BoardAction = 'approve' | 'accept' | 'rework' | 'unblock' | 'replan' | 'planNow' | 'continue' | 'openPr' | 'runNext';
 
 type Message =
   | { type: 'ready' }
   | { type: 'open'; file: string }
-  | { type: 'setStatus'; file: string; status: string }
-  | { type: 'setStage'; file: string; stage: FlowStage }
-  | { type: 'setDates'; file: string; start?: string; end?: string }
-  | { type: 'setStatusMany'; files: string[]; status?: string }
-  | { type: 'setOwnerMany'; files: string[]; owner?: string }
-  | { type: 'setDatesMany'; changes: { file: string; start?: string; end?: string }[] }
-  | { type: 'newTask'; project?: string; status?: string }
-  | { type: 'agent'; action: 'send' | 'sendAs' | 'unblock' | 'continue'; file: string };
+  | { type: 'drop'; file: string; stage: FlowStage }
+  | { type: 'approveMany'; files: string[] }
+  | { type: 'acceptMany'; files: string[] }
+  | { type: 'newIdea'; project?: string }
+  | { type: 'action'; action: BoardAction; file?: string };
 
-const TITLES: Record<PanelKind, string> = { board: 'Kanban', flow: 'AI Flow', waterfall: 'Waterfall' };
+const COMMANDS: Record<BoardAction, string> = {
+  approve: 'mdpm.approve',
+  accept: 'mdpm.accept',
+  rework: 'mdpm.rework',
+  unblock: 'mdpm.unblock',
+  replan: 'mdpm.replan',
+  planNow: 'mdpm.planNow',
+  continue: 'mdpm.continueWithAgent',
+  openPr: 'mdpm.openPr',
+  runNext: 'mdpm.runNext',
+};
 
-/** Hosts the board and waterfall webviews; one panel per kind. */
-export class ViewPanel {
-  private static readonly open = new Map<PanelKind, ViewPanel>();
+/** Hosts the flow board webview (one panel). */
+export class BoardPanel {
+  private static current?: BoardPanel;
   private readonly panel: vscode.WebviewPanel;
   private readonly disposables: vscode.Disposable[] = [];
 
-  static show(kind: PanelKind, extensionUri: vscode.Uri, model: Model, project?: string) {
-    const existing = ViewPanel.open.get(kind);
-    if (existing) {
-      existing.panel.reveal();
-      if (project) existing.panel.webview.postMessage({ type: 'focusProject', project });
+  static show(extensionUri: vscode.Uri, model: Model, project?: string) {
+    if (BoardPanel.current) {
+      BoardPanel.current.panel.reveal();
+      if (project) BoardPanel.current.panel.webview.postMessage({ type: 'focusProject', project });
       return;
     }
-    ViewPanel.open.set(kind, new ViewPanel(kind, extensionUri, model, project));
+    BoardPanel.current = new BoardPanel(extensionUri, model, project);
   }
 
   private constructor(
-    private readonly kind: PanelKind,
     extensionUri: vscode.Uri,
     private readonly model: Model,
     private initialProject?: string,
   ) {
     const media = vscode.Uri.joinPath(extensionUri, 'media');
-    this.panel = vscode.window.createWebviewPanel(`mdpm.${kind}`, `mdpm: ${TITLES[kind]}`, vscode.ViewColumn.Active, {
+    this.panel = vscode.window.createWebviewPanel('mdpm.flow', 'mdpm: Flow', vscode.ViewColumn.Active, {
       enableScripts: true,
       retainContextWhenHidden: true,
       localResourceRoots: [media],
@@ -73,67 +78,42 @@ export class ViewPanel {
         case 'open':
           await vscode.window.showTextDocument(vscode.Uri.file(m.file), { viewColumn: vscode.ViewColumn.Beside, preview: true });
           break;
-        case 'setStatus':
-          await this.model.update(this.task(m.file), { status: m.status });
+        case 'drop':
+          await flow.drop(this.model, this.task(m.file), m.stage);
           break;
-        case 'setStage': {
-          const task = this.task(m.file);
-          const status = statusForStage(m.stage, task.home.statuses);
-          if (!status) {
-            throw new Error(
-              `${task.home.name} has no status for the "${FLOW_STAGE_INFO[m.stage].label}" stage (its statuses are ${task.home.statuses.join(', ')}). ` +
-                `Add one of ${FLOW_STAGE_INFO[m.stage].statuses.filter((s) => s !== 'blocked').join(', ')} to "statuses" in its .proj file.`,
-            );
-          }
-          if (status !== task.status) await this.model.update(task, { status });
-          else this.post();
+        case 'approveMany':
+          await flow.approve(this.model, this.tasks(m.files));
           break;
-        }
-        case 'setDates':
-          await this.model.update(this.task(m.file), { start: m.start, end: m.end });
+        case 'acceptMany':
+          await flow.accept(this.model, this.tasks(m.files));
           break;
-        case 'setStatusMany':
-          await setStatus(this.model, this.tasks(m.files), m.status);
+        case 'newIdea':
+          await vscode.commands.executeCommand('mdpm.newIdea', { projectKey: m.project });
           break;
-        case 'setOwnerMany':
-          await setOwner(this.model, this.tasks(m.files), m.owner);
+        case 'action':
+          await vscode.commands.executeCommand(COMMANDS[m.action], m.file ? { taskFile: this.task(m.file).file } : undefined);
           break;
-        case 'setDatesMany': {
-          const tasks = this.tasks(m.changes.map((c) => c.file));
-          await this.model.updateMany(m.changes.map((c, i) => ({ task: tasks[i], changes: { start: c.start, end: c.end } })));
-          break;
-        }
-        case 'newTask':
-          await vscode.commands.executeCommand('mdpm.newTask', { projectKey: m.project, status: m.status });
-          break;
-        case 'agent': {
-          const command = { send: 'mdpm.sendToAgent', sendAs: 'mdpm.sendToAgentAs', unblock: 'mdpm.unblock', continue: 'mdpm.continueWithAgent' }[m.action];
-          await vscode.commands.executeCommand(command, { taskFile: this.task(m.file).file });
-          break;
-        }
       }
     } catch (e) {
-      vscode.window.showErrorMessage(
-        `mdpm: the change was not saved: ${e instanceof Error ? e.message : e} The view has been reset to what is on disk.`,
-      );
+      vscode.window.showErrorMessage(`mdpm: the change was not saved: ${e instanceof Error ? e.message : e} The board shows what is on disk.`);
       this.post(); // revert optimistic UI changes
     }
   }
 
   private task(file: string) {
     const task = this.model.task(file);
-    if (!task) throw new Error(`${file} is no longer a task (it may have been moved or deleted). Run "mdpm: Refresh" and try again.`);
+    if (!task) throw new Error(`${file} is no longer an idea (it may have been moved or deleted). Run "mdpm: Refresh" and try again.`);
     return task;
   }
 
-  /** All tasks for `files`; names every file that is gone, so nothing is changed half-way. */
+  /** All ideas for `files`; names every file that is gone, so nothing is changed half-way. */
   private tasks(files: string[]) {
     const tasks = files.map((f) => this.model.task(f));
     const gone = files.filter((_, i) => !tasks[i]);
     if (gone.length) {
       throw new Error(
-        `${gone.join(', ')} ${gone.length > 1 ? 'are' : 'is'} no longer a task (moved or deleted?), so none of the ${files.length} selected tasks were changed. ` +
-          'Run "mdpm: Refresh", select the tasks again and repeat the change.',
+        `${gone.join(', ')} ${gone.length > 1 ? 'are' : 'is'} no longer an idea (moved or deleted?), so none of the ${files.length} selected ideas were changed. ` +
+          'Run "mdpm: Refresh", select them again and repeat the change.',
       );
     }
     return tasks as Task[];
@@ -150,19 +130,19 @@ export class ViewPanel {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} data:; script-src 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="${uri('style.css')}">
-<title>${TITLES[this.kind]}</title>
+<title>Flow</title>
 </head>
-<body class="${this.kind}">
+<body class="flow">
 <div id="toolbar" class="toolbar"></div>
 <div id="app"></div>
 <script nonce="${nonce}" src="${uri('common.js')}"></script>
-<script nonce="${nonce}" src="${uri(`${this.kind}.js`)}"></script>
+<script nonce="${nonce}" src="${uri('flow.js')}"></script>
 </body>
 </html>`;
   }
 
   private dispose() {
-    ViewPanel.open.delete(this.kind);
+    BoardPanel.current = undefined;
     this.disposables.forEach((d) => d.dispose());
   }
 }

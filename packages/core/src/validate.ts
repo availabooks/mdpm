@@ -1,8 +1,22 @@
 import * as path from 'path';
-import { PLACEHOLDERS, agentNames, parseAgentDefinition } from './agent';
-import { QUESTIONS_HEADING, openQuestions, readiness } from './body';
+import { PLACEHOLDERS, parseAgentDefinition } from './agent';
+import { OBSOLETE_HEADINGS, QUESTIONS_HEADING, headings, openQuestions, planCheck } from './body';
 import { buildTask, toPosix } from './build';
-import { AGENT_MODES, BLOCKED_STATUS, Issue, PROJECT_FIELDS, Project, TASK_FIELDS, TASK_FIELD_ALIASES, Task, TaskMeta, Workspace } from './types';
+import { inSlot, isBlockable, isStatus } from './flow';
+import {
+  BLOCKABLE_STATUSES,
+  BLOCKED_STATUS,
+  Issue,
+  OBSOLETE_PROJECT_FIELDS,
+  OBSOLETE_TASK_FIELDS,
+  PROJECT_FIELDS,
+  Project,
+  STATUSES,
+  TASK_FIELDS,
+  Task,
+  TaskMeta,
+  Workspace,
+} from './types';
 
 /*
  * Validation rules. Every issue has a stable `code` so scripts and agents can react to
@@ -28,15 +42,9 @@ export function validateProject(ws: Workspace, p: Project): Issue[] {
     if (has(k) && typeof meta[k] !== 'string') add('error', 'proj/field-type', k, `"${k}" must be text, e.g. ${k}: Website`);
   }
 
-  if (has('statuses')) {
-    const s = meta.statuses;
-    if (!isStringList(s)) {
-      add('error', 'proj/field-type', 'statuses', '"statuses" must be a list of column names, e.g. statuses: [todo, in-progress, done]');
-    } else if (s.length === 0) {
-      add('error', 'proj/statuses-empty', 'statuses', '"statuses" is empty. List at least one column, or delete the line to inherit the parent project\'s statuses.');
-    } else {
-      const dupes = s.filter((x, i) => s.indexOf(x) !== i);
-      if (dupes.length) add('error', 'proj/statuses-duplicate', 'statuses', `"statuses" lists ${quoteList([...new Set(dupes)])} more than once. Remove the duplicates.`);
+  for (const k of OBSOLETE_PROJECT_FIELDS) {
+    if (has(k)) {
+      add('warning', 'proj/obsolete-field', k, `"${k}" is from the task-based workflow and is ignored: every project uses the flow's statuses (${STATUSES.join(', ')}). Delete it, or run "mdpm migrate --write" to update the whole workspace.`);
     }
   }
 
@@ -53,30 +61,6 @@ export function validateProject(ws: Workspace, p: Project): Issue[] {
     }
   }
 
-  if (has('required')) {
-    if (!isStringList(meta.required)) add('error', 'proj/field-type', 'required', '"required" must be a list of front matter fields, e.g. required: [owner]');
-    else checkFieldNames(meta.required, 'required', add);
-  }
-
-  if (has('requiredByStatus')) {
-    const r = meta.requiredByStatus;
-    if (!isPlainObject(r) || !Object.values(r).every(isStringList)) {
-      add('error', 'proj/field-type', 'requiredByStatus', '"requiredByStatus" must map statuses to lists of fields, e.g.\n  requiredByStatus:\n    in-progress: [owner]');
-    } else {
-      for (const [status, fields] of Object.entries(r)) {
-        if (!p.statuses.includes(status)) {
-          add(
-            'error',
-            'proj/required-unknown-status',
-            'requiredByStatus',
-            `"requiredByStatus" has a rule for "${status}", which is not a status of this project (${p.statuses.join(', ')}). Rename it to one of those, or remove it.`,
-          );
-        }
-        checkFieldNames(fields, `requiredByStatus.${status}`, add);
-      }
-    }
-  }
-
   if (has('agent')) checkAgentSettings(meta.agent, add);
   if (has('agents')) {
     if (p.parent) add('warning', 'proj/agents-not-root', 'agents', `"agents" is only read from the root .proj, so it is ignored here. Move it to ${rel(ws, rootOf(p).file)}.`);
@@ -84,6 +68,7 @@ export function validateProject(ws: Workspace, p: Project): Issue[] {
   }
 
   for (const k of Object.keys(meta)) {
+    if (OBSOLETE_PROJECT_FIELDS.includes(k)) continue;
     const hint = typoOf(k, PROJECT_FIELDS);
     if (hint) {
       // If the intended key is absent, its value is silently lost, which deserves an error.
@@ -96,23 +81,15 @@ export function validateProject(ws: Workspace, p: Project): Issue[] {
 
 type Add = (level: Issue['level'], code: string, field: string | undefined, message: string) => void;
 
-const AGENT_KEYS = ['enabled', 'unassigned', 'modes', 'maxTurns', 'allowedTools', 'maxBudgetUsd'];
+const AGENT_KEYS = ['enabled', 'maxTurns', 'allowedTools', 'maxBudgetUsd'];
+const OBSOLETE_AGENT_KEYS = ['unassigned', 'modes'];
 
 function checkAgentSettings(a: unknown, add: Add) {
   if (!isPlainObject(a)) {
-    add('error', 'proj/field-type', 'agent', '"agent" must be a block of settings, e.g.\n  agent:\n    enabled: true\n    unassigned: false');
+    add('error', 'proj/field-type', 'agent', '"agent" must be a block of settings, e.g.\n  agent:\n    enabled: true\n    maxTurns: 50');
     return;
   }
-  for (const k of ['enabled', 'unassigned']) {
-    if (a[k] !== undefined && typeof a[k] !== 'boolean') add('error', 'proj/field-type', 'agent', `"agent.${k}" must be true or false.`);
-  }
-  if (a.modes !== undefined) {
-    if (!isStringList(a.modes)) add('error', 'proj/field-type', 'agent', `"agent.modes" must be a list, e.g. modes: [${AGENT_MODES.join(', ')}]`);
-    else {
-      const bad = a.modes.filter((m) => !(AGENT_MODES as string[]).includes(m));
-      if (bad.length) add('error', 'proj/field-value', 'agent', `"agent.modes" lists ${quoteList(bad)}. The modes are ${AGENT_MODES.join(', ')}.`);
-    }
-  }
+  if (a.enabled !== undefined && typeof a.enabled !== 'boolean') add('error', 'proj/field-type', 'agent', '"agent.enabled" must be true or false.');
   if (a.maxTurns !== undefined && !(Number.isInteger(a.maxTurns) && (a.maxTurns as number) > 0)) add('error', 'proj/field-value', 'agent', '"agent.maxTurns" must be a whole number above 0, e.g. maxTurns: 50');
   if (a.maxBudgetUsd !== undefined && !(typeof a.maxBudgetUsd === 'number' && a.maxBudgetUsd > 0)) add('error', 'proj/field-value', 'agent', '"agent.maxBudgetUsd" must be a number above 0, e.g. maxBudgetUsd: 5');
   if (a.allowedTools !== undefined && !isStringList(a.allowedTools)) {
@@ -120,6 +97,10 @@ function checkAgentSettings(a: unknown, add: Add) {
   }
   for (const k of Object.keys(a)) {
     if (AGENT_KEYS.includes(k)) continue;
+    if (OBSOLETE_AGENT_KEYS.includes(k)) {
+      add('warning', 'proj/obsolete-field', 'agent', `"agent.${k}" is from the task-based workflow and is ignored: the agent plans every idea and executes every approved plan, one at a time. Delete it, or run "mdpm migrate --write".`);
+      continue;
+    }
     const hint = typoOf(k, AGENT_KEYS) ?? AGENT_KEYS.find((n) => n.toLowerCase() === k.toLowerCase());
     add('warning', 'proj/unknown-field', 'agent', `Unknown setting "agent.${k}".${hint ? ` Did you mean "${hint}"?` : ` The agent settings are ${AGENT_KEYS.join(', ')}.`} It is ignored.`);
   }
@@ -155,18 +136,18 @@ function checkAgentDefinitions(a: unknown, add: Add) {
   }
 }
 
-/** Checks tasks individually and against each other (ids, dependencies). */
+/** Checks ideas individually and against each other (ids, the execution slot). */
 export function validateTasks(ws: Workspace, tasks: Task[]): Issue[] {
   const issues: Issue[] = [];
   const byId = new Map<string, Task[]>();
   for (const t of tasks) byId.set(t.id, [...(byId.get(t.id) ?? []), t]);
-  const agents = agentNames(ws);
+  const slot = tasks.filter(inSlot);
 
   for (const t of tasks) {
     const add = (level: Issue['level'], code: string, field: string | undefined, message: string) =>
       issues.push({ level, code, file: t.file, field, line: field ? t.lines[field] : undefined, message });
-    checkTask(ws, t, add);
-    checkAgentTask(t, agents, add);
+    checkTask(t, add);
+    checkFlow(t, add);
 
     const same = byId.get(t.id)!;
     if (same.length > 1) {
@@ -175,99 +156,74 @@ export function validateTasks(ws: Workspace, tasks: Task[]): Issue[] {
         'error',
         'task/duplicate-id',
         t.meta.id !== undefined ? 'id' : undefined,
-        `Duplicate task id "${t.id}" (also used by ${others.join(', ')}). Rename one of the files, or give one an explicit "id:" in its front matter, so depends_on can tell them apart.`,
+        `Duplicate idea id "${t.id}" (also used by ${others.join(', ')}). Rename one of the files, or give one an explicit "id:" in its front matter, so commands can tell them apart.`,
       );
     }
 
-    const depField = t.meta.depends_on !== undefined ? 'depends_on' : t.meta.dependsOn !== undefined ? 'dependsOn' : 'depends';
-    for (const dep of t.dependsOn) {
-      if (dep === t.id) {
-        add('error', 'task/dependency-self', depField, `The task lists itself in ${depField}. Remove "${dep}" from that list.`);
-      } else if (!byId.has(dep)) {
-        const hint = suggest(dep, [...byId.keys()]);
-        add(
-          'error',
-          'task/dependency-unknown',
-          depField,
-          `${depField} lists "${dep}", but no task has that id.${hint ? ` Did you mean "${hint}"?` : ''} Use a task's id (its "id:" field, or its file name without the extension), or remove the entry.`,
-        );
-      } else if (isDone(t)) {
-        const open = byId.get(dep)!.filter((d) => !isDone(d));
-        for (const d of open) {
-          add(
-            'warning',
-            'task/dependency-open',
-            'status',
-            `This task is "${t.status}" but its dependency "${dep}" is still "${d.status}". Finish ${rel(ws, d.file)} first, or move this task back.`,
-          );
-        }
-      }
-    }
-  }
-
-  for (const cycle of findCycles(tasks, byId)) {
-    const path = [...cycle, cycle[0]].map((t) => t.id).join(' → ');
-    for (const t of cycle) {
-      issues.push({
-        level: 'error',
-        code: 'task/dependency-cycle',
-        file: t.file,
-        field: 'depends_on',
-        line: t.lines.depends_on,
-        message: `depends_on forms a cycle (${path}), so none of these tasks can ever start. Remove one of these dependencies.`,
-      });
+    if (slot.length > 1 && slot.includes(t)) {
+      const others = slot.filter((o) => o !== t).map((o) => `"${o.id}"`);
+      add(
+        'error',
+        'task/slot-taken',
+        'status',
+        `Only one idea can hold the execution slot (executing, or blocked while executing), but ${others.join(', ')} ${others.length > 1 ? 'hold' : 'holds'} it too. Move all but one back to the plan queue with "mdpm move <id> plan".`,
+      );
     }
   }
   return issues;
 }
 
-/** Rules for the agent workflow: blocked tasks carry questions; tasks queued for an agent are ready. */
-function checkAgentTask(t: Task, agents: Set<string>, add: Add) {
-  if (t.status === BLOCKED_STATUS && !openQuestions(t.body).length) {
-    add(
-      'warning',
-      'task/blocked-without-question',
-      'status',
-      `The task is blocked but has no open question. Add what it is waiting for under "## ${QUESTIONS_HEADING}" as "- [ ] …", or move it back to another status.`,
-    );
-  }
-  if (t.status === 'todo' && t.owner && agents.has(t.owner)) {
-    const r = readiness(t.body);
-    if (!r.ready) {
-      add(
-        'warning',
-        'task/not-ready',
-        'owner',
-        `This task is queued for ${t.owner} but isn't ready, so the agent will only refine it. Add ${r.missing} (the "agent" template has every section: mdpm new --template agent).`,
-      );
+/** Rules of the flow: blocked ideas say what they wait for and where they return; approvals fit the status. */
+function checkFlow(t: Task, add: Add) {
+  if (t.status === BLOCKED_STATUS) {
+    if (!openQuestions(t.body).length) {
+      add('warning', 'task/blocked-without-question', 'status', `The idea is blocked but has no open question. Add what it is waiting for under "## ${QUESTIONS_HEADING}" as "- [ ] …", or unblock it (mdpm unblock ${t.id}).`);
     }
+    if (!t.blockedFrom) {
+      add('error', 'task/blocked-from-missing', 'status', `The idea is blocked but has no "blocked_from", so it is unclear where it returns when unblocked. Add "blocked_from: ${BLOCKABLE_STATUSES.join(' | ')}" to the front matter.`);
+    } else if (!isBlockable(t.blockedFrom)) {
+      add('error', 'task/blocked-from-invalid', 'blocked_from', `"blocked_from" is "${t.blockedFrom}", but an idea can only be blocked from ${BLOCKABLE_STATUSES.join(', ')}. Change it to the status the idea should return to.`);
+    }
+  } else if (t.meta.blocked_from !== undefined) {
+    add('warning', 'task/blocked-from-stale', 'blocked_from', `"blocked_from" only applies to blocked ideas, and this one is "${t.status}". Delete the line.`);
+  }
+  if (t.approved && t.status === 'idea') {
+    add('warning', 'task/approved-idea', 'approved', `The idea is marked approved but has no plan yet, so it will be planned like any other idea. Delete "approved", or approve it once its plan is written (mdpm approve ${t.id}).`);
+  }
+  if (t.status === 'plan' && t.approved && !planCheck(t.body).complete) {
+    add('warning', 'task/plan-incomplete', 'approved', `The plan is approved but has no acceptance criteria, so the agent can't tell when it is done. Add ${planCheck(t.body).missing}.`);
+  }
+  for (const h of headings(t.body)) {
+    const now = OBSOLETE_HEADINGS[h];
+    if (now) add('warning', 'task/obsolete-section', undefined, `The section "## ${h[0].toUpperCase()}${h.slice(1)}" is from the task-based workflow; the flow uses "## ${now}". Rename it, or run "mdpm migrate --write".`);
   }
 }
 
-function checkTask(ws: Workspace, t: Task, add: Add) {
+function checkTask(t: Task, add: Add) {
   const m = t.meta;
   const has = (k: string) => m[k] !== undefined && m[k] !== null;
 
-  for (const k of ['id', 'title', 'status', 'owner', 'author', 'priority', 'branch', 'pr']) {
+  for (const k of ['id', 'title', 'status', 'author', 'priority', 'branch', 'pr', 'blocked_from']) {
     if (has(k) && !isScalar(m[k])) add('error', 'task/field-type', k, `"${k}" must be a single value, e.g. ${k}: ${example(k)}`);
   }
-  for (const k of ['tags', 'depends_on', ...TASK_FIELD_ALIASES]) {
-    if (has(k) && !isScalar(m[k]) && !(Array.isArray(m[k]) && (m[k] as unknown[]).every(isScalar))) {
-      add('error', 'task/field-type', k, `"${k}" must be a list, e.g. ${k}: [${k === 'tags' ? 'ui, backend' : 'other-task-id'}]`);
-    }
+  if (has('tags') && !isScalar(m.tags) && !(Array.isArray(m.tags) && m.tags.every(isScalar))) {
+    add('error', 'task/field-type', 'tags', '"tags" must be a list, e.g. tags: [ui, backend]');
   }
 
-  if (has('status') && isScalar(m.status) && !t.home.statuses.includes(t.status)) {
-    const hint = suggest(t.status, t.home.statuses);
+  if (has('status') && isScalar(m.status) && !isStatus(t.status)) {
+    const old = OLD_STATUSES[t.status];
+    const hint = old ? undefined : suggest(t.status, [...STATUSES]);
     add(
       'error',
       'task/status-unknown',
       'status',
-      `Status "${t.status}" is not a column of project "${t.home.name}" (${t.home.statuses.join(', ')}).${hint ? ` Did you mean "${hint}"?` : ''} Change "status:" to one of those, or add "${t.status}" to "statuses" in ${rel(ws, t.home.file)}.`,
+      old
+        ? `Status "${t.status}" is from the task-based workflow; in the flow it is "${old}". Run "mdpm migrate --write" to update the whole workspace, or change it here.`
+        : `Status "${t.status}" is not part of the flow (${STATUSES.join(', ')}).${hint ? ` Did you mean "${hint}"?` : ''} Change "status:" to one of those.`,
     );
   }
 
-  for (const k of ['created', 'start', 'end'] as const) {
+  for (const k of ['created', 'approved', 'completed'] as const) {
     if (!has(k)) continue;
     const v: unknown = m[k];
     if (typeof v !== 'string' || !isRealDate(v)) {
@@ -275,40 +231,28 @@ function checkTask(ws: Workspace, t: Task, add: Add) {
       add('error', 'task/date-invalid', k, `"${k}" is "${shown}", which is not a valid date. Write it as YYYY-MM-DD, e.g. ${k}: ${EXAMPLE_DATE}`);
     }
   }
-  if (t.start && t.end && isRealDate(t.start) && isRealDate(t.end) && t.end < t.start) {
-    add('error', 'task/date-order', 'end', `"end" (${t.end}) is before "start" (${t.start}). Swap them or correct one of the dates.`);
-  }
-
-  for (const f of t.home.required) {
-    if (isEmpty(m[f])) {
-      add('error', 'task/required-missing', f, `Every task in "${t.home.name}" must have "${f}" (rule "required" in ${rel(ws, ruleSource(t.home, 'required'))}). Add "${f}: …" to the front matter.`);
-    }
-  }
-  for (const f of t.home.requiredByStatus[t.status] ?? []) {
-    if (isEmpty(m[f]) && !t.home.required.includes(f)) {
-      add(
-        'error',
-        'task/required-missing',
-        f,
-        `Tasks in "${t.status}" must have "${f}" (rule "requiredByStatus" in ${rel(ws, ruleSource(t.home, 'requiredByStatus'))}). Add "${f}: …" to the front matter, or move the task to another status.`,
-      );
-    }
-  }
 
   for (const k of Object.keys(m)) {
-    const hint = typoOf(k, [...TASK_FIELDS, ...TASK_FIELD_ALIASES]);
+    if (OBSOLETE_TASK_FIELDS.includes(k)) {
+      add('warning', 'task/obsolete-field', k, `"${k}" is from the task-based workflow and is ignored by the flow. Delete it, or run "mdpm migrate --write" to update the whole workspace.`);
+      continue;
+    }
+    const hint = typoOf(k, TASK_FIELDS);
     if (hint) {
-      // If the intended field is absent, its value is silently lost (e.g. status falls back to the first column).
+      // If the intended field is absent, its value is silently lost (e.g. status falls back to idea).
       const lost = m[hint] === undefined;
       add(
         lost ? 'error' : 'warning',
         'task/unknown-field',
         k,
-        `Unknown field "${k}". Did you mean "${hint}"? ${lost ? `As written it is ignored, so the task has no "${hint}"${hint === 'status' ? ` and shows as "${t.status}"` : ''}.` : "mdpm ignores fields it doesn't know."}`,
+        `Unknown field "${k}". Did you mean "${hint}"? ${lost ? `As written it is ignored, so the idea has no "${hint}"${hint === 'status' ? ` and shows as "${t.status}"` : ''}.` : "mdpm ignores fields it doesn't know."}`,
       );
     }
   }
 }
+
+/** Statuses of the task-based workflow, and the flow status `mdpm migrate` usually gives them. */
+const OLD_STATUSES: Record<string, string> = { backlog: 'idea', todo: 'plan', 'in-progress': 'executing', doing: 'executing', planned: 'plan', building: 'executing' };
 
 /**
  * Issues that applying `changes` (and, optionally, a new `body`) to `task` would introduce. Problems the task already had are
@@ -327,7 +271,7 @@ export function previewTaskChange(ws: Workspace, task: Task, changes: Record<str
   return after.filter((i) => !before.has(key(i)));
 }
 
-/** Issues a new task with this front matter would have, if created at `file` in `project`. */
+/** Issues a new idea with this front matter would have, if created at `file` in `project`. */
 export function previewNewTask(ws: Workspace, project: Project, file: string, meta: TaskMeta): Issue[] {
   const candidate = buildTask(file, meta, '', [{ path: file, project }]);
   return validateTasks(ws, [...ws.tasks, candidate]).filter((i) => i.file === file);
@@ -351,53 +295,8 @@ function typoOf(key: string, known: string[]): string | undefined {
   return known.find((n) => n.toLowerCase() === k) ?? known.find((n) => distance(n.toLowerCase(), k) <= limit);
 }
 
-function checkFieldNames(fields: string[], where: string, add: Add) {
-  for (const f of fields) {
-    const hint = typoOf(f, TASK_FIELDS);
-    if (hint) add('warning', 'proj/unknown-field', where.split('.')[0], `"${where}" lists "${f}". Did you mean "${hint}"? As written, tasks must have a "${f}" field.`);
-  }
-}
-
-function findCycles(tasks: Task[], byId: Map<string, Task[]>): Task[][] {
-  const state = new Map<Task, 'visiting' | 'done'>();
-  const stack: Task[] = [];
-  const cycles: Task[][] = [];
-  const seen = new Set<Task>();
-  const visit = (t: Task) => {
-    state.set(t, 'visiting');
-    stack.push(t);
-    for (const dep of t.dependsOn) {
-      for (const d of byId.get(dep) ?? []) {
-        if (d === t) continue; // reported as dependency-self
-        if (state.get(d) === 'visiting') {
-          const cycle = stack.slice(stack.indexOf(d));
-          if (!cycle.some((c) => seen.has(c))) {
-            cycle.forEach((c) => seen.add(c));
-            cycles.push(cycle);
-          }
-        } else if (!state.has(d)) visit(d);
-      }
-    }
-    stack.pop();
-    state.set(t, 'done');
-  };
-  tasks.forEach((t) => state.has(t) || visit(t));
-  return cycles;
-}
-
 function rootOf(p: Project): Project {
   return p.parent ? rootOf(p.parent) : p;
-}
-
-/** The project whose .proj actually defines an inherited rule. */
-function ruleSource(p: Project, key: 'required' | 'requiredByStatus'): string {
-  let cur: Project | undefined = p;
-  while (cur && cur.meta[key] === undefined) cur = cur.parent;
-  return (cur ?? p).file;
-}
-
-function isDone(t: Task): boolean {
-  return t.status === t.home.statuses[t.home.statuses.length - 1];
 }
 
 function isRealDate(s: string): boolean {
@@ -419,12 +318,8 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date);
 }
 
-function isEmpty(v: unknown): boolean {
-  return v === undefined || v === null || (typeof v === 'string' && v.trim() === '') || (Array.isArray(v) && v.length === 0);
-}
-
 function example(k: string): string {
-  return { id: 'login-page', title: 'Login page', status: 'todo', owner: 'eli', author: 'eli', priority: '1' }[k] ?? 'value';
+  return { id: 'login-page', title: 'Login page', status: 'idea', author: 'eli', priority: '1', blocked_from: 'executing' }[k] ?? 'value';
 }
 
 function quoteList(xs: string[]): string {

@@ -1,23 +1,19 @@
-// Shared state, filtering and toolbar for the board and waterfall webviews.
+// Shared state, filtering, selection and toolbar for the flow board webview.
 /* eslint-disable no-unused-vars */
 const vscode = acquireVsCodeApi();
 
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-// Yellow is reserved for "blocked", so it stands out wherever it appears.
-const STATUS_COLORS = ['--vscode-charts-blue', '--vscode-charts-purple', '--vscode-charts-orange'];
 const BLOCKED = 'blocked';
-const BLOCKED_COLOR = 'var(--vscode-charts-yellow)';
 const PRIORITY_WORDS = { critical: 0, urgent: 0, high: 1, medium: 2, normal: 2, low: 3 };
 
 const mdpm = {
   model: null,
-  state: Object.assign({ project: '', owner: '', q: '' }, vscode.getState() || {}),
-  /** Keys of the tasks picked with Ctrl/Cmd+click. */
+  state: Object.assign({ project: '', q: '' }, vscode.getState() || {}),
+  /** Keys of the ideas picked with Ctrl/Cmd+click. */
   selected: new Set(),
   render: () => {},
-  today: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10),
 
   priorityRank(p) {
     if (typeof p === 'number') return p;
@@ -28,14 +24,9 @@ const mdpm = {
     return isNaN(n) ? 50 : n;
   },
 
-  /** Sorts in place by priority, then due date, then title. */
+  /** Sorts in place by priority, then title. */
   sorted(list) {
-    return list.sort(
-      (a, b) =>
-        this.priorityRank(a.priority) - this.priorityRank(b.priority) ||
-        (a.end ?? '9999').localeCompare(b.end ?? '9999') ||
-        a.title.localeCompare(b.title),
-    );
+    return list.sort((a, b) => this.priorityRank(a.priority) - this.priorityRank(b.priority) || a.title.localeCompare(b.title));
   },
 
   save() {
@@ -58,36 +49,15 @@ const mdpm = {
   },
 
   filtered() {
-    const { project, owner, q } = this.state;
+    const { project, q } = this.state;
     const inProject = project ? this.subtree(project) : null;
     const needle = q.trim().toLowerCase();
     return this.model.tasks.filter(
-      (t) =>
-        (!inProject || t.projects.some((p) => inProject.has(p))) &&
-        (!owner || (owner === '-' ? !t.owner : t.owner === owner)) &&
-        (!needle || [t.title, t.id, t.owner, ...t.tags].some((s) => s && String(s).toLowerCase().includes(needle))),
+      (t) => (!inProject || t.projects.some((p) => inProject.has(p))) && (!needle || [t.title, t.id, ...t.tags].some((s) => s && String(s).toLowerCase().includes(needle))),
     );
   },
 
-  statuses(task) {
-    return this.project(task.home)?.statuses ?? this.model.statuses;
-  },
-
-  isDone(task) {
-    const s = this.statuses(task);
-    return task.status === s[s.length - 1];
-  },
-
-  statusColor(task) {
-    if (task.status === BLOCKED) return BLOCKED_COLOR;
-    const s = this.statuses(task).filter((x) => x !== BLOCKED);
-    const i = s.indexOf(task.status);
-    if (i === s.length - 1) return 'var(--vscode-charts-green)';
-    if (i <= 0) return 'var(--vscode-descriptionForeground)';
-    return `var(${STATUS_COLORS[(i - 1) % STATUS_COLORS.length]})`;
-  },
-
-  /** Ctrl/Cmd+click toggles the task in the selection; a plain click clears it and opens the task. */
+  /** Ctrl/Cmd+click toggles the idea in the selection; a plain click clears it and opens the idea. */
   clickTask(e, key) {
     if (e.ctrlKey || e.metaKey) {
       if (this.selected.has(key)) this.selected.delete(key);
@@ -97,12 +67,6 @@ const mdpm = {
       this.clearSelection();
       this.post({ type: 'open', file: key });
     }
-  },
-
-  /** Makes the click that follows a pointer drag not count as a click on empty space. */
-  ignoreClick() {
-    this.ignoringClick = true;
-    setTimeout(() => (this.ignoringClick = false));
   },
 
   clearSelection() {
@@ -118,21 +82,22 @@ const mdpm = {
     for (const key of this.selected) if (!visible.has(key)) this.selected.delete(key);
   },
 
-  /** Selected tasks, in model order. */
+  /** Selected ideas, in model order. */
   selectedTasks() {
     return this.model.tasks.filter((t) => this.selected.has(t.key));
   },
 
   /** Updates the selected style and the toolbar's selection controls without re-rendering. */
   paintSelection() {
-    for (const el of document.querySelectorAll('.card[data-key], .wf-label[data-key], .bar[data-key]')) {
-      el.classList.toggle('selected', this.selected.has(el.dataset.key));
-    }
+    for (const el of document.querySelectorAll('.card[data-key]')) el.classList.toggle('selected', this.selected.has(el.dataset.key));
     const n = this.selected.size;
     const box = document.getElementById('sel');
     if (!box) return;
     box.hidden = !n;
     document.getElementById('sel-n').textContent = `${n} selected`;
+    const sel = this.model ? this.selectedTasks() : [];
+    document.getElementById('b-sel-approve').hidden = !sel.some((t) => t.status === 'idea' || (t.status === 'plan' && !t.approved));
+    document.getElementById('b-sel-accept').hidden = !sel.some((t) => t.status === 'review');
   },
 
   /** `45s`, `3m`, `1h 5m`: how long ago `iso` was. */
@@ -143,49 +108,34 @@ const mdpm = {
     return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
   },
 
-  /**
-   * What an agent is doing with a task right now ("claude implementing · 3m", pulsing), or a quiet
-   * "queued" for agent-owned tasks that are waiting for a run, so a card in Todo says what is going on.
-   */
+  /** What an agent is doing with an idea right now ("claude executing · 3m", pulsing). */
   runBadge(t) {
-    if (t.running) {
-      const verb = { refine: 'refining', implement: 'implementing', resume: 'resuming work', chat: 'chatting with you' }[t.running.mode] ?? 'working';
-      return `<span class="running" title="${esc(`${t.running.agent} is ${verb}. Started ${t.running.started}`)}"><span class="pulse"></span>${esc(t.running.agent)} ${verb} · <span class="age" data-since="${esc(t.running.started)}">${this.ago(t.running.started)}</span></span>`;
-    }
-    if (t.agentOwned && ['backlog', 'todo'].includes(t.status)) {
-      return `<span class="queued" title="${esc(`Queued for ${t.owner}: the next agent run picks it up`)}">queued</span>`;
-    }
-    return '';
+    if (!t.running) return '';
+    const verb = { plan: 'planning', execute: 'executing', chat: 'chatting with you' }[t.running.mode] ?? 'working';
+    return `<span class="running" title="${esc(`${t.running.agent} is ${verb}. Started ${t.running.started}`)}"><span class="pulse"></span>${esc(t.running.agent)} ${verb} · <span class="age" data-since="${esc(t.running.started)}">${this.ago(t.running.started)}</span></span>`;
   },
 
-  /** Agents only pick up backlog, todo and in-progress tasks. */
-  canSendToAgent(task) {
-    return ['backlog', 'todo', 'in-progress'].includes(task.status);
-  },
-
-  /** Builds the toolbar once; later calls only refresh the dropdown options. */
+  /** Builds the toolbar once; later calls only refresh the project options. */
   toolbar(extraHtml, wireExtra) {
     const bar = document.getElementById('toolbar');
     if (!bar.dataset.built) {
       bar.dataset.built = '1';
       bar.innerHTML = `
         <label>Project <select id="f-project"></select></label>
-        <label>Owner <select id="f-owner"></select></label>
         <input id="f-q" type="search" placeholder="Filter…" value="${esc(this.state.q)}">
         <span id="sel" class="sel" hidden>
           <span id="sel-n" class="sel-n"></span>
-          <button id="b-sel-status" title="Set the status of all selected tasks">Set status…</button>
-          <button id="b-sel-owner" title="Set the owner of all selected tasks">Set owner…</button>
+          <button id="b-sel-approve" title="Approve the selected plans">Approve</button>
+          <button id="b-sel-accept" title="Accept the selected work in review">Accept</button>
           <button id="b-sel-clear" title="Clear the selection (Escape)">Clear</button>
         </span>
         <span class="spacer"></span>
         ${extraHtml}`;
       const on = (id, ev, fn) => document.getElementById(id).addEventListener(ev, fn);
       on('f-project', 'change', (e) => this.set({ project: e.target.value }));
-      on('f-owner', 'change', (e) => this.set({ owner: e.target.value }));
       on('f-q', 'input', (e) => this.set({ q: e.target.value }));
-      on('b-sel-status', 'click', () => this.post({ type: 'setStatusMany', files: [...this.selected] }));
-      on('b-sel-owner', 'click', () => this.post({ type: 'setOwnerMany', files: [...this.selected] }));
+      on('b-sel-approve', 'click', () => this.post({ type: 'approveMany', files: this.selectedTasks().filter((t) => t.status === 'idea' || (t.status === 'plan' && !t.approved)).map((t) => t.key) }));
+      on('b-sel-accept', 'click', () => this.post({ type: 'acceptMany', files: this.selectedTasks().filter((t) => t.status === 'review').map((t) => t.key) }));
       on('b-sel-clear', 'click', () => this.clearSelection());
       wireExtra?.();
     }
@@ -193,12 +143,7 @@ const mdpm = {
     if (this.state.project && !this.project(this.state.project)) this.state.project = '';
     document.getElementById('f-project').innerHTML =
       `<option value="">All projects</option>` +
-      m.projects
-        .map((p) => `<option value="${esc(p.key)}" ${p.key === this.state.project ? 'selected' : ''}>${'   '.repeat(p.depth)}${esc(p.name)}</option>`)
-        .join('');
-    document.getElementById('f-owner').innerHTML =
-      `<option value="">Anyone</option><option value="-" ${this.state.owner === '-' ? 'selected' : ''}>Unassigned</option>` +
-      m.owners.map((o) => `<option ${o === this.state.owner ? 'selected' : ''}>${esc(o)}</option>`).join('');
+      m.projects.map((p) => `<option value="${esc(p.key)}" ${p.key === this.state.project ? 'selected' : ''}>${'   '.repeat(p.depth)}${esc(p.name)}</option>`).join('');
   },
 
   set(patch) {
@@ -231,9 +176,9 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') mdpm.clearSelection();
 });
 
-// A click on empty board/timeline space clears the selection.
+// A click on empty board space clears the selection.
 document.getElementById('app').addEventListener('click', (e) => {
-  if (!mdpm.ignoringClick && !e.target.closest('.card, .wf-label[data-key], .bar, .wf-track.unscheduled, button, a, input, select')) mdpm.clearSelection();
+  if (!e.target.closest('.card, button, a, input, select')) mdpm.clearSelection();
 });
 
 // Keep the "3m" in running badges current without re-rendering.

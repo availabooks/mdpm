@@ -7,16 +7,12 @@ priority: 1
 tags:
   - agents
   - ui
-depends_on:
-  - design-the-agent-workflow
-owner: claude
-start: 2026-10-19
-end: 2026-10-19
+completed: 2026-10-19
 ---
 
 # Blocked status in all views
 
-## Description
+## Idea
 
 Add a `blocked` status that agents (and people) use when a task can't move forward without an answer. Design: [docs/agent-workflow.md](../../docs/agent-workflow.md) (Lifecycle).
 
@@ -27,7 +23,7 @@ Add a `blocked` status that agents (and people) use when a task can't move forwa
 - [x] New validator rule `task/blocked-without-question` (warning): a blocked task should have at least one open `- [ ]` item under `## Questions`
 - [x] README documents `blocked` and the new rule; tests cover the rule
 
-## Agent log
+## Log
 
 - 2026-10-19 10:26 claude — claimed (run session-2026-10-19)
 - 2026-10-19 10:27 claude — handed off for review: blocked is in DEFAULT_STATUSES, mdpm init and tasks/.proj (with requiredByStatus blocked: [owner]). Yellow column/cards on the board, warning icon in the tree, yellow bars on the waterfall (yellow taken out of the other statuses' colours); the CLI board/list/show highlight it too. New rule task/blocked-without-question with tests; README updated. Verified: npm test, typecheck, build, mdpm check --strict. Not checked by eye in VS Code yet.

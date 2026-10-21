@@ -1,12 +1,16 @@
 /*
- * Helpers for the markdown body of a task: finding `## sections`, checkboxes, and appending
- * to the `## Questions` and `## Agent log` sections that agents write back to.
+ * Helpers for the markdown body of an idea: finding `## sections`, checkboxes, and appending
+ * to the `## Questions` and `## Log` sections that the flow commands write to.
  */
 
+export const IDEA_HEADING = 'Idea';
+export const PLAN_HEADING = 'Plan';
 export const QUESTIONS_HEADING = 'Questions';
-export const AGENT_LOG_HEADING = 'Agent log';
+export const LOG_HEADING = 'Log';
 export const CRITERIA_HEADING = 'Acceptance criteria';
 export const VERIFICATION_HEADING = 'Verification';
+/** Section names from the task-based workflow, renamed by `mdpm migrate`. */
+export const OBSOLETE_HEADINGS: Record<string, string> = { 'agent log': LOG_HEADING, description: IDEA_HEADING };
 
 const HEADING = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
 const FENCE = /^\s*(```|~~~)/;
@@ -40,6 +44,11 @@ function sections(lines: string[]): Map<string, Section> {
   return out;
 }
 
+/** Names (lower case) of the `## headings` in a body, in order. */
+export function headings(body: string): string[] {
+  return [...sections(body.split(/\r?\n/)).keys()];
+}
+
 /** Text of the `## heading` section (case-insensitive), without the heading line; undefined when there is none. */
 export function sectionText(body: string, heading: string): string | undefined {
   const lines = body.split(/\r?\n/);
@@ -70,6 +79,19 @@ export function openQuestions(body: string): string[] {
     .map((c) => c.text);
 }
 
+/** Ticks every open question under `## Questions` (they were answered). Line endings are kept. */
+export function tickQuestions(body: string): string {
+  const eol = body.includes('\r\n') ? '\r\n' : '\n';
+  const lines = body.split(/\r?\n/);
+  const s = sections(lines).get(QUESTIONS_HEADING.toLowerCase());
+  if (!s) return body;
+  for (let i = s.start + 1; i < s.end; i++) {
+    const m = CHECKBOX.exec(lines[i]);
+    if (m && m[1] === ' ' && m[2].trim()) lines[i] = lines[i].replace('[ ]', '[x]');
+  }
+  return lines.join(eol);
+}
+
 export interface LogEntry {
   /** `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`. */
   when: string;
@@ -79,9 +101,9 @@ export interface LogEntry {
 
 const LOG_LINE = /^\s*[-*]\s+(\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?)\s+(.+?)\s+[—–-]\s+(.*)$/;
 
-/** Entries of the `## Agent log` section, oldest first. Continuation lines are joined to their entry. */
-export function agentLog(body: string): LogEntry[] {
-  const text = sectionText(body, AGENT_LOG_HEADING);
+/** Entries of the `## Log` section, oldest first. Continuation lines are joined to their entry. */
+export function logEntries(body: string): LogEntry[] {
+  const text = sectionText(body, LOG_HEADING);
   if (!text) return [];
   const out: LogEntry[] = [];
   for (const line of text.split('\n')) {
@@ -94,7 +116,7 @@ export function agentLog(body: string): LogEntry[] {
 
 /**
  * Adds `newLines` at the end of the `## heading` section, creating it when missing. A new
- * `## Agent log` goes at the end of the body; any other new section goes before the agent log.
+ * `## Log` goes at the end of the body; any other new section goes before the log.
  * Line endings of the body are kept.
  */
 export function appendToSection(body: string, heading: string, newLines: string[]): string {
@@ -113,8 +135,8 @@ export function appendToSection(body: string, heading: string, newLines: string[
   }
 
   const block = [`## ${heading}`, '', ...newLines];
-  const log = all.get(AGENT_LOG_HEADING.toLowerCase());
-  if (log && heading.toLowerCase() !== AGENT_LOG_HEADING.toLowerCase()) {
+  const log = all.get(LOG_HEADING.toLowerCase());
+  if (log && heading.toLowerCase() !== LOG_HEADING.toLowerCase()) {
     lines.splice(log.start, 0, ...block, '');
     return lines.join(eol);
   }
@@ -143,65 +165,56 @@ function stripComments(s: string): string {
   return s.replace(/<!--[\s\S]*?-->/g, '');
 }
 
-export interface Readiness {
-  /** True when an agent can implement the task as written. */
-  ready: boolean;
+export interface PlanCheck {
+  /** True when the plan can be approved and executed: it has acceptance criteria. */
+  complete: boolean;
   /** Acceptance criteria items with text. */
   criteria: number;
-  /** The task says how to check the work (a `## Verification` section with content). */
+  /** The plan says how to check the work (a `## Verification` section with content). */
   verification: boolean;
-  /** Why it isn't ready, phrased as what to add. */
+  /** Why it isn't complete, phrased as what to add. */
   missing?: string;
 }
 
 /**
- * A task is ready for an agent when its `## Acceptance criteria` section has at least one
- * checkbox item with text. A `## Verification` section (commands or tests that prove the work)
- * is recommended but not required.
+ * A plan is complete when its `## Acceptance criteria` section has at least one checkbox item
+ * with text. A `## Verification` section (commands or tests that prove the work) is recommended
+ * but not required.
  */
-export function readiness(body: string): Readiness {
+export function planCheck(body: string): PlanCheck {
   const criteria = checkboxes(sectionText(body, CRITERIA_HEADING)).length;
   const verification = !!stripComments(sectionText(body, VERIFICATION_HEADING) ?? '').trim();
   return {
-    ready: criteria > 0,
+    complete: criteria > 0,
     criteria,
     verification,
     missing: criteria > 0 ? undefined : `an "## ${CRITERIA_HEADING}" section with at least one "- [ ] …" item`,
   };
 }
 
-export type TaskTemplate = 'default' | 'agent';
-export const TASK_TEMPLATES: TaskTemplate[] = ['default', 'agent'];
-
-/** Body of a new task. The `agent` template has every section an agent needs to work unattended. */
-export function taskBody(title: string, template: TaskTemplate = 'default'): string {
-  if (template === 'default') return `\n# ${title}\n\n## Description\n\n\n## ${CRITERIA_HEADING}\n\n- [ ] \n`;
+/** Body of a new idea. You write the Idea section; the agent fills in the rest when it plans. */
+export function ideaBody(title: string): string {
   return `
 # ${title}
 
-## Goal
+## ${IDEA_HEADING}
 
-<!-- What should be true when this is done, in one or two sentences. Write it the way you would prompt the agent. -->
+<!-- What you want, in your own words, the way you would prompt the agent. This is the only part you have to write. -->
 
-## Context
+## ${PLAN_HEADING}
 
-<!-- Where to look: files, functions, docs, related tasks, links. What has been tried or decided already. -->
+<!-- The agent's approach: what it will change, where, and in which order. Filled in when it plans the idea. -->
 
 ## ${CRITERIA_HEADING}
 
-<!-- One checkbox per observable outcome. An agent only implements a task that has at least one. -->
-- [ ]
+<!-- One checkbox per observable outcome, e.g. "- [ ] The export button downloads a CSV". -->
 
 ## ${VERIFICATION_HEADING}
 
-<!-- Commands or tests that prove the work, e.g. \`npm test\`, or steps to try by hand. -->
-
-## Constraints
-
-<!-- What not to change, conventions to follow, limits on scope. -->
+<!-- Commands or checks that prove it works, e.g. \`npm test\`. -->
 
 ## ${QUESTIONS_HEADING}
 
-<!-- Open questions, as "- [ ] …". Agents add theirs here when they block. -->
+<!-- Open questions, as "- [ ] …". The agent adds its own when it blocks. -->
 `;
 }

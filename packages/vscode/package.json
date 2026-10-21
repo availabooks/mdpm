@@ -1,7 +1,7 @@
 {
   "name": "mdpm-vscode",
-  "displayName": "mdpm — Markdown Projects & Tasks",
-  "description": "Kanban board, waterfall timeline and project tree for markdown tasks that live in your repo",
+  "displayName": "mdpm — AI flow for your repo",
+  "description": "Idea → plan → executing → review → done: write ideas in markdown, approve the agent's plans, review its work. A flow board and project tree for ideas that live in your repo.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -85,28 +85,15 @@
       },
       {
         "command": "mdpm.openBoard",
-        "title": "Open Kanban Board",
-        "category": "mdpm",
-        "icon": "$(project)"
-      },
-      {
-        "command": "mdpm.openFlow",
-        "title": "Open AI Flow Board (Idea → Planned → Building → Review → Done)",
-        "shortTitle": "Open AI Flow Board",
+        "title": "Open Flow Board",
         "category": "mdpm",
         "icon": "$(sparkle)"
       },
       {
-        "command": "mdpm.openWaterfall",
-        "title": "Open Waterfall Timeline",
+        "command": "mdpm.newIdea",
+        "title": "New Idea",
         "category": "mdpm",
-        "icon": "$(graph-line)"
-      },
-      {
-        "command": "mdpm.newTask",
-        "title": "New Task",
-        "category": "mdpm",
-        "icon": "$(add)"
+        "icon": "$(lightbulb)"
       },
       {
         "command": "mdpm.newProject",
@@ -115,13 +102,67 @@
         "icon": "$(new-folder)"
       },
       {
-        "command": "mdpm.setStatus",
-        "title": "Set Status…",
+        "command": "mdpm.approve",
+        "title": "Approve Plan",
+        "category": "mdpm",
+        "icon": "$(check)"
+      },
+      {
+        "command": "mdpm.replan",
+        "title": "Re-plan…",
+        "category": "mdpm",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "mdpm.planNow",
+        "title": "Plan Now",
+        "category": "mdpm",
+        "icon": "$(play)"
+      },
+      {
+        "command": "mdpm.unblock",
+        "title": "Answer & Unblock",
+        "category": "mdpm",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "mdpm.moveBackToPlan",
+        "title": "Move Back to Plan Queue",
         "category": "mdpm"
       },
       {
-        "command": "mdpm.setOwner",
-        "title": "Set Owner…",
+        "command": "mdpm.accept",
+        "title": "Accept",
+        "category": "mdpm",
+        "icon": "$(pass)"
+      },
+      {
+        "command": "mdpm.rework",
+        "title": "Rework…",
+        "category": "mdpm",
+        "icon": "$(reply)"
+      },
+      {
+        "command": "mdpm.openPr",
+        "title": "Open Pull Request",
+        "category": "mdpm",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "mdpm.continueWithAgent",
+        "title": "Continue with Agent",
+        "category": "mdpm",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "mdpm.runNext",
+        "title": "Run Agent: Next in the Flow",
+        "category": "mdpm",
+        "icon": "$(play-circle)"
+      },
+      {
+        "command": "mdpm.runUntilIdle",
+        "title": "Run Agent: Until Nothing Is Left",
         "category": "mdpm"
       },
       {
@@ -143,40 +184,12 @@
         "command": "mdpm.revealInExplorer",
         "title": "Reveal in Explorer",
         "category": "mdpm"
-      },
-      {
-        "command": "mdpm.sendToAgent",
-        "title": "Send to Agent",
-        "category": "mdpm",
-        "icon": "$(hubot)"
-      },
-      {
-        "command": "mdpm.sendToAgentAs",
-        "title": "Send to Agent…",
-        "category": "mdpm"
-      },
-      {
-        "command": "mdpm.queueForAgent",
-        "title": "Queue for Agent…",
-        "category": "mdpm"
-      },
-      {
-        "command": "mdpm.unblock",
-        "title": "Unblock",
-        "category": "mdpm",
-        "icon": "$(debug-continue)"
-      },
-      {
-        "command": "mdpm.continueWithAgent",
-        "title": "Continue with Agent",
-        "category": "mdpm",
-        "icon": "$(comment-discussion)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "mdpm.newTask",
+          "command": "mdpm.newIdea",
           "when": "view == mdpm.projects",
           "group": "navigation@1"
         },
@@ -186,34 +199,34 @@
           "group": "navigation@2"
         },
         {
-          "command": "mdpm.openFlow",
+          "command": "mdpm.runNext",
           "when": "view == mdpm.projects",
           "group": "navigation@3"
         },
         {
-          "command": "mdpm.openWaterfall",
+          "command": "mdpm.refresh",
           "when": "view == mdpm.projects",
           "group": "navigation@4"
         },
         {
-          "command": "mdpm.refresh",
-          "when": "view == mdpm.projects",
-          "group": "navigation@5"
-        },
-        {
           "command": "mdpm.newProject",
           "when": "view == mdpm.projects",
-          "group": "more"
+          "group": "more@1"
+        },
+        {
+          "command": "mdpm.runUntilIdle",
+          "when": "view == mdpm.projects",
+          "group": "more@2"
         }
       ],
       "view/item/context": [
         {
-          "command": "mdpm.newTask",
+          "command": "mdpm.newIdea",
           "when": "viewItem == project",
           "group": "inline"
         },
         {
-          "command": "mdpm.newTask",
+          "command": "mdpm.newIdea",
           "when": "viewItem == project",
           "group": "1_create@1"
         },
@@ -228,79 +241,89 @@
           "group": "2_view@1"
         },
         {
-          "command": "mdpm.openFlow",
-          "when": "viewItem == project",
-          "group": "2_view@2"
-        },
-        {
-          "command": "mdpm.openWaterfall",
-          "when": "viewItem == project",
-          "group": "2_view@3"
-        },
-        {
           "command": "mdpm.openProjectFile",
           "when": "viewItem == project",
           "group": "3_edit"
         },
         {
-          "command": "mdpm.setStatus",
-          "when": "viewItem =~ /^task/",
-          "group": "1_edit@1"
+          "command": "mdpm.planNow",
+          "when": "viewItem =~ /^idea.*:idea$/",
+          "group": "inline"
         },
         {
-          "command": "mdpm.setOwner",
-          "when": "viewItem =~ /^task/",
-          "group": "1_edit@2"
+          "command": "mdpm.approve",
+          "when": "viewItem =~ /^idea.*:plan$/",
+          "group": "inline"
+        },
+        {
+          "command": "mdpm.unblock",
+          "when": "viewItem =~ /^idea.*:blocked$/",
+          "group": "inline"
+        },
+        {
+          "command": "mdpm.accept",
+          "when": "viewItem =~ /^idea.*:review$/",
+          "group": "inline"
+        },
+        {
+          "command": "mdpm.planNow",
+          "when": "viewItem =~ /^idea.*:idea$/",
+          "group": "0_flow@1"
+        },
+        {
+          "command": "mdpm.approve",
+          "when": "viewItem =~ /^idea.*:(plan|idea)$/",
+          "group": "0_flow@2"
+        },
+        {
+          "command": "mdpm.replan",
+          "when": "viewItem =~ /^idea.*:plan(-approved)?$/",
+          "group": "0_flow@3"
+        },
+        {
+          "command": "mdpm.unblock",
+          "when": "viewItem =~ /^idea.*:blocked$/",
+          "group": "0_flow@4"
+        },
+        {
+          "command": "mdpm.moveBackToPlan",
+          "when": "viewItem =~ /^idea.*:executing$/",
+          "group": "0_flow@5"
+        },
+        {
+          "command": "mdpm.accept",
+          "when": "viewItem =~ /^idea.*:review$/",
+          "group": "0_flow@6"
+        },
+        {
+          "command": "mdpm.rework",
+          "when": "viewItem =~ /^idea.*:review$/",
+          "group": "0_flow@7"
+        },
+        {
+          "command": "mdpm.openPr",
+          "when": "viewItem =~ /^idea.*:(review|done)$/",
+          "group": "0_flow@8"
+        },
+        {
+          "command": "mdpm.continueWithAgent",
+          "when": "viewItem =~ /^idea.*:(plan|plan-approved|executing|blocked|review|done)$/",
+          "group": "1_agent@1"
         },
         {
           "command": "mdpm.linkTask",
-          "when": "viewItem =~ /^task/",
+          "when": "viewItem =~ /^idea/",
           "group": "2_link@1"
         },
         {
           "command": "mdpm.unlinkTask",
-          "when": "viewItem =~ /^taskLink/",
+          "when": "viewItem =~ /^ideaLink/",
           "group": "2_link@2"
         },
         {
           "command": "mdpm.revealInExplorer",
-          "when": "viewItem",
+          "when": "viewItem =~ /^(project|idea)/",
           "group": "9_reveal"
-        },
-        {
-          "command": "mdpm.sendToAgent",
-          "when": "viewItem =~ /^task.*:open$/",
-          "group": "inline"
-        },
-        {
-          "command": "mdpm.unblock",
-          "when": "viewItem =~ /^task.*:blocked$/",
-          "group": "inline"
-        },
-        {
-          "command": "mdpm.sendToAgent",
-          "when": "viewItem =~ /^task.*:open$/",
-          "group": "0_agent@1"
-        },
-        {
-          "command": "mdpm.sendToAgentAs",
-          "when": "viewItem =~ /^task.*:open$/",
-          "group": "0_agent@2"
-        },
-        {
-          "command": "mdpm.queueForAgent",
-          "when": "viewItem =~ /^task.*:open$/",
-          "group": "0_agent@3"
-        },
-        {
-          "command": "mdpm.unblock",
-          "when": "viewItem =~ /^task.*:blocked$/",
-          "group": "0_agent@1"
-        },
-        {
-          "command": "mdpm.continueWithAgent",
-          "when": "viewItem =~ /^task.*:(open|blocked|done)$/",
-          "group": "0_agent@4"
         }
       ],
       "commandPalette": [
@@ -317,25 +340,76 @@
           "when": "false"
         },
         {
+          "command": "mdpm.approve",
+          "when": "mdpm.activeTaskState =~ /^(plan|idea)$/"
+        },
+        {
+          "command": "mdpm.replan",
+          "when": "mdpm.activeTaskState =~ /^plan/"
+        },
+        {
+          "command": "mdpm.planNow",
+          "when": "mdpm.activeTaskState == idea"
+        },
+        {
           "command": "mdpm.unblock",
-          "when": "mdpm.activeTaskBlocked"
+          "when": "mdpm.activeTaskState == blocked"
+        },
+        {
+          "command": "mdpm.moveBackToPlan",
+          "when": "mdpm.activeTaskState == executing"
+        },
+        {
+          "command": "mdpm.accept",
+          "when": "mdpm.activeTaskState == review"
+        },
+        {
+          "command": "mdpm.rework",
+          "when": "mdpm.activeTaskState == review"
+        },
+        {
+          "command": "mdpm.openPr",
+          "when": "mdpm.activeTask"
+        },
+        {
+          "command": "mdpm.continueWithAgent",
+          "when": "mdpm.activeTask"
+        },
+        {
+          "command": "mdpm.linkTask",
+          "when": "mdpm.activeTask"
         }
       ],
       "editor/title": [
         {
-          "command": "mdpm.sendToAgent",
-          "when": "mdpm.activeTask && !mdpm.activeTaskBlocked",
+          "command": "mdpm.planNow",
+          "when": "mdpm.activeTaskState == idea",
+          "group": "navigation@90"
+        },
+        {
+          "command": "mdpm.approve",
+          "when": "mdpm.activeTaskState == plan",
           "group": "navigation@90"
         },
         {
           "command": "mdpm.unblock",
-          "when": "mdpm.activeTaskBlocked",
+          "when": "mdpm.activeTaskState == blocked",
           "group": "navigation@90"
         },
         {
-          "command": "mdpm.continueWithAgent",
-          "when": "mdpm.activeTask",
+          "command": "mdpm.accept",
+          "when": "mdpm.activeTaskState == review",
+          "group": "navigation@90"
+        },
+        {
+          "command": "mdpm.rework",
+          "when": "mdpm.activeTaskState == review",
           "group": "navigation@91"
+        },
+        {
+          "command": "mdpm.continueWithAgent",
+          "when": "mdpm.activeTask && mdpm.activeTaskState != idea",
+          "group": "navigation@92"
         }
       ]
     },
@@ -347,28 +421,10 @@
           "default": "",
           "description": "Folder (relative to each workspace folder) to scan for projects. Set this when mdpm lives inside a large repo, e.g. \"tasks\"."
         },
-        "mdpm.defaultOwner": {
-          "type": "string",
-          "default": "",
-          "description": "Owner for new tasks. Leave empty to leave tasks unassigned."
-        },
         "mdpm.agent.default": {
           "type": "string",
           "default": "claude",
-          "description": "Agent that \"Send to Agent\" runs: claude, codex, cursor, or an agent defined under \"agents:\" in the root .proj. \"Send to Agent…\" picks another one."
-        },
-        "mdpm.taskTemplate": {
-          "type": "string",
-          "enum": [
-            "agent",
-            "default"
-          ],
-          "default": "agent",
-          "enumDescriptions": [
-            "Goal, Context, Acceptance criteria, Verification, Constraints and Questions: everything an agent needs to work on the task unattended.",
-            "Description and Acceptance criteria only."
-          ],
-          "description": "Body of tasks created with \"New Task\"."
+          "description": "Agent that Plan Now and Run Agent use: claude, codex, cursor, or an agent defined under \"agents:\" in the root .proj."
         }
       }
     }

@@ -1,23 +1,19 @@
 ---
 title: "Continue with Agent: talk to the agent in its context"
 status: done
-owner: claude
 author: Elijah Allen
 created: 2026-10-19
 priority: 2
 tags:
   - agents
   - vscode
-depends_on:
-  - agent-runner
-start: 2026-10-19
 branch: agent/continue-with-agent
-end: 2026-10-19
+completed: 2026-10-19
 ---
 
 # Continue with Agent: talk to the agent in its context
 
-## Description
+## Idea
 
 Click a task and open the agent that worked on it, with its conversation, so you can give it more directions. Design: [docs/agent-workflow.md](../../docs/agent-workflow.md) (Continuing a conversation).
 
@@ -35,7 +31,7 @@ Click a task and open the agent that worked on it, with its conversation, so you
 - `npm test`, `npm run typecheck`, `npm run build`, `mdpm check --strict`
 - Verified against the real `claude` CLI: a session started in a worktree can be resumed with `--resume` and `--continue` after the worktree is removed and recreated at the same path, and `--continue` accumulates directions across sessions.
 
-## Agent log
+## Log
 
 - 2026-10-19 14:12 claude — claimed (run session-2026-10-19)
 - 2026-10-19 14:12 claude — handed off for review: Built mdpm agent continue (core planContinue/runInteractive, CLI, VS Code button/menus/title), tests, docs. Not verified: driving the interactive Claude TUI itself and clicking the VS Code button; the pieces underneath were checked (real claude --continue after worktree recreation, dry runs, unit tests). Also fixed main's failing CI: the webview tests' fake DOM lacked querySelectorAll and captured the wrong window listener after the multi-select merge.

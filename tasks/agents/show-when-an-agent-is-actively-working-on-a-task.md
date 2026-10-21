@@ -1,21 +1,19 @@
 ---
 title: Show when an agent is actively working on a task
 status: done
-owner: claude
 author: Elijah Allen
 created: 2026-10-19
 priority: 2
 tags:
   - agents
   - vscode
-start: 2026-10-19
 branch: agent/agent-activity-indicator
-end: 2026-10-19
+completed: 2026-10-19
 ---
 
 # Show when an agent is actively working on a task
 
-## Description
+## Idea
 
 A task sitting in Todo could be queued, being refined or being built, and nothing said which. Show it in every view. Design: [docs/agent-workflow.md](../../docs/agent-workflow.md) (Showing activity).
 
@@ -33,7 +31,7 @@ A task sitting in Todo could be queued, being refined or being built, and nothin
 - `npm test`, `npm run typecheck`, `npm run build`, `mdpm check --strict`
 - With a slow stand-in agent: `mdpm agent status` shows it while it runs; Ctrl-C clears it at once; `kill -9` leaves a file that is ignored
 
-## Agent log
+## Log
 
 - 2026-10-19 14:59 claude — claimed (run session-2026-10-19)
 - 2026-10-19 14:59 claude — handed off for review: Activity markers + badges/spinner/status bar + CLI + double-start guard, with tests and a live check using a slow stand-in agent (status while running, SIGINT, kill -9). Not checked: the real VS Code UI (pulse/glow, tree spinner, status bar) has not been looked at.

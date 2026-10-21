@@ -1,6 +1,6 @@
 ---
 title: Try the extension on Windows
-status: backlog
+status: idea
 author: Elijah Allen
 created: 2026-10-19
 tags:
@@ -9,7 +9,7 @@ tags:
 
 # Try the extension on Windows
 
-## Description
+## Idea
 
 
 ## Acceptance criteria

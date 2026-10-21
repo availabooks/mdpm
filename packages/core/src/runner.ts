@@ -1,28 +1,29 @@
 import { spawn, spawnSync } from 'child_process';
 import { existsSync, promises as fs } from 'fs';
 import * as path from 'path';
-import { AgentDefinition, AgentPick, agentDefinitions, agentQueue, expandArgs, lastEntryIsClaim, modeFor, planClaim, writeBack } from './agent';
-import { agentLog, readiness } from './body';
+import { AgentDefinition, WriteBack, agentDefinitions, expandArgs, writeBack } from './agent';
+import { logEntries, planCheck } from './body';
 import { activityVerb, ago, markActive, readActive } from './activity';
+import { FlowPick, flowQueue, ideaBranch, modeFor, planBlock, planPropose, planStart } from './flow';
 import { buildContinuePrompt, buildPrompt } from './instructions';
-import { applyStatusDefaults, slugify } from './ops';
 import { AgentMode, BLOCKED_STATUS, Task, Workspace } from './types';
 import { previewTaskChange } from './validate';
 import { findTask, loadWorkspace } from './workspace';
 
 /*
- * `mdpm agent run`: pick a task, claim it, run an agent CLI on it in its own git worktree,
- * and record what happened. Design: docs/agent-workflow.md ("Running agents").
+ * `mdpm agent run`: do the next thing in the flow (execute the idea in the slot or the top
+ * approved plan, else plan the top idea) in the one agent worktree, and record what happened.
+ * One run at a time per workspace. Design: docs/agent-workflow.md ("Running").
  */
 
 export interface RunOptions {
-  /** Workspace root (the main checkout); task state is written here. */
+  /** Workspace root (the main checkout); idea state is written here. */
   root: string;
   agent?: string;
-  /** Run this task instead of picking one ("Send to agent"). */
-  task?: string;
-  /** Stop after this many tasks (default 1). */
-  maxTasks?: number;
+  /** Plan or execute this idea instead of picking one. */
+  idea?: string;
+  /** Keep going until nothing is left to do or usage runs out (default: one run). */
+  untilIdle?: boolean;
   /** Overrides the project's `agent.maxTurns`. */
   maxTurns?: number;
   /** Print what would run; change nothing. */
@@ -38,16 +39,18 @@ export interface RunOptions {
 export interface RunRecord {
   id: string;
   agent: string;
-  task: string;
+  /** Idea id. */
+  idea: string;
   mode: AgentMode;
+  resume?: boolean;
   started: string;
   ended: string;
   durationMs: number;
   exitCode: number | null;
-  /** Task status after the run. */
+  /** Idea status after the run. */
   status: string;
+  /** The idea's branch (execute), or the default branch read detached (plan). */
   branch: string;
-  worktree?: string;
   sessionId?: string;
   costUsd?: number;
   limited?: boolean;
@@ -59,19 +62,25 @@ export interface RunRecord {
 
 export interface RunSummary {
   records: RunRecord[];
-  /** Why the loop ended. */
+  /** Why the runner stopped. */
   stopped: string;
 }
 
 export class RunnerError extends Error {}
 
-/** Message for a task an agent is already working on (it would otherwise be started twice in one worktree). */
-function busyMessage(r: { agent: string; mode: Parameters<typeof activityVerb>[0]; started: string; pid: number }, task: string): string {
-  return `${r.agent} is already ${activityVerb(r.mode)} "${task}" (started ${ago(r.started)} ago, pid ${r.pid}). Wait for it to finish, or stop that process first; a run that died is ignored after a minute.`;
+/** Folder of the one worktree every run uses, under the state folder (`.mdpm/agent`). */
+export const AGENT_WORKTREE = 'agent';
+
+/** Message for a second run (or chat) while one is going: one run at a time per workspace. */
+function busyMessage(r: { agent: string; task: string; mode: Parameters<typeof activityVerb>[0]; started: string; pid: number }): string {
+  return `${r.agent} is already ${activityVerb(r.mode)} "${r.task}" (started ${ago(r.started)} ago, pid ${r.pid}), and only one run happens at a time. Wait for it to finish, or stop that process first; a run that died is ignored after a minute.`;
 }
 
-/** The question a refined task is blocked on, so the person reviews it before an agent implements it. */
-export const REVIEW_REFINEMENT = 'Review the refined description and acceptance criteria. Edit anything that is off, answer any other questions here, then Unblock (or move it to todo) to have it implemented.';
+/** The question a plan run is blocked on when it ended without writing a plan. */
+export const NO_PLAN_QUESTION = 'The plan run ended without a plan (no acceptance criteria were written). Add anything that would help to the Idea section, then unblock it to have it planned again.';
+
+/** Runs per idea in one `--until-idle` loop before it is left for the next loop (stops endless resumes). */
+const MAX_RUNS_PER_IDEA = 3;
 
 const LIMIT_PATTERNS = [/hit your (?:session |weekly |usage |opus |5-hour )?limit/i, /usage limit (?:reached|exceeded)/i, /(?:session|weekly|5-hour) limit (?:reached|exceeded)/i];
 
@@ -180,6 +189,7 @@ export function runId(now = new Date()): string {
   return `r-${stamp}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+
 function git(cwd: string, args: string[]): { ok: boolean; out: string; err: string } {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
   return { ok: r.status === 0, out: (r.stdout ?? '').trim(), err: (r.stderr ?? '').trim() || (r.error?.message ?? '') };
@@ -191,12 +201,30 @@ export function gitRoot(dir: string): string | undefined {
   return r.ok ? path.resolve(r.out) : undefined;
 }
 
+/** True when the repository has a local branch `name`. */
+export function branchExists(repo: string, name: string): boolean {
+  return git(repo, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`]).ok;
+}
+
+/**
+ * The branch ideas start from and plans are read against: the remote's default branch when it
+ * exists locally, else `main` or `master`, else whatever the main checkout has checked out.
+ */
+export function defaultBranch(repo: string): string {
+  const remote = git(repo, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
+  const candidates = [remote.ok ? remote.out.replace(/^origin\//, '') : '', 'main', 'master'].filter(Boolean);
+  const local = candidates.find((b) => branchExists(repo, b));
+  if (local) return local;
+  if (remote.ok) return remote.out;
+  return git(repo, ['branch', '--show-current']).out || 'HEAD';
+}
+
 /** Folder for runner state (`.mdpm/` at the repo top), git-ignored by its own .gitignore. */
 async function stateDir(repo: string): Promise<string> {
   const dir = path.join(repo, '.mdpm');
   await fs.mkdir(path.join(dir, 'runs'), { recursive: true });
   const ignore = path.join(dir, '.gitignore');
-  if (!existsSync(ignore)) await fs.writeFile(ignore, '# Runner state (worktrees, run records); never committed.\n*\n');
+  if (!existsSync(ignore)) await fs.writeFile(ignore, '# Runner state (the agent worktree, run records); never committed.\n*\n');
   return dir;
 }
 
@@ -210,54 +238,88 @@ async function writeShims(dir: string, cli: { node: string; script: string }): P
   return bin;
 }
 
-/** Creates (or reuses) the worktree for a task on `branch`. */
-function ensureWorktree(repo: string, worktree: string, branch: string): void {
+/** Creates the agent worktree (detached at `base`) the first time; reuses it afterwards. */
+function ensureAgentWorktree(repo: string, worktree: string, base: string): void {
   if (existsSync(path.join(worktree, '.git'))) return;
-  const hasBranch = git(repo, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]).ok;
   git(repo, ['worktree', 'prune']);
-  const r = git(repo, hasBranch ? ['worktree', 'add', worktree, branch] : ['worktree', 'add', '-b', branch, worktree, 'HEAD']);
+  const r = git(repo, ['worktree', 'add', '--detach', worktree, base]);
   if (!r.ok) {
+    throw new RunnerError(`Could not create the agent worktree at ${worktree} from ${base} (${r.err}). Run "git worktree list", remove a stale entry with "git worktree remove <path>", then try again.`);
+  }
+}
+
+/**
+ * Keeps whatever the worktree has uncommitted before it switches: committed to the branch it is
+ * on (`wip: …`), or stashed when it is detached (a plan run should not have changed anything).
+ * Returns what was done, for the log.
+ */
+function saveWork(worktree: string, message: string): string | undefined {
+  if (!git(worktree, ['status', '--porcelain']).out) return undefined;
+  const branch = git(worktree, ['branch', '--show-current']).out;
+  if (!branch) {
+    const r = git(worktree, ['stash', 'push', '--include-untracked', '-m', `mdpm: ${message}`]);
+    if (!r.ok) throw new RunnerError(`The agent worktree ${worktree} has uncommitted changes that could not be stashed (${r.err}). Commit or discard them there, then try again.`);
+    return `stashed uncommitted changes in the agent worktree ("git -C ${worktree} stash list" shows them)`;
+  }
+  const add = git(worktree, ['add', '-A']);
+  const commit = add.ok ? git(worktree, ['commit', '--no-verify', '-qm', `wip: ${message}`]) : add;
+  if (!commit.ok) {
+    throw new RunnerError(`The agent worktree has uncommitted changes on ${branch} that could not be committed (${commit.err}). If git asks who you are, set user.name and user.email; otherwise commit or discard the changes in ${worktree}, then try again.`);
+  }
+  return `committed uncommitted changes to ${branch} as "wip: ${message}"`;
+}
+
+/** Puts the agent worktree on `branch` (created from `base` if new), or detached at `base` when `branch` is undefined. */
+function switchWorktree(repo: string, worktree: string, base: string, branch: string | undefined): void {
+  const current = git(worktree, ['branch', '--show-current']).out;
+  if (branch && current === branch) return;
+  const args = !branch ? ['checkout', '--quiet', '--detach', base] : branchExists(repo, branch) ? ['checkout', '--quiet', branch] : ['checkout', '--quiet', '-b', branch, base];
+  const r = git(worktree, args);
+  if (!r.ok) {
+    const elsewhere = /already (checked out|used by worktree) at '([^']+)'/.exec(r.err)?.[2];
     throw new RunnerError(
-      `Could not create a git worktree for ${branch} at ${worktree} (${r.err}). If the branch is checked out elsewhere, run "git worktree list" and remove the stale one with "git worktree remove <path>".`,
+      elsewhere
+        ? `${branch} is checked out in ${elsewhere}, so the agent can't work on it. Switch that checkout to another branch (git switch -), then try again.`
+        : `Could not check out ${branch ?? base} in the agent worktree (${r.err}). Fix it in ${worktree} (git status), then try again.`,
     );
   }
 }
 
-/** Removes a worktree unless it has uncommitted changes. Returns whether it was removed. */
-function removeWorktree(repo: string, worktree: string): boolean {
-  if (!existsSync(worktree)) return true;
-  if (git(worktree, ['status', '--porcelain']).out) return false;
-  return git(repo, ['worktree', 'remove', worktree]).ok;
+/** Saves the worktree's work (see `saveWork`) and switches it; returns the save note, if any. */
+function prepareWorktree(ws: Workspace, repo: string, worktree: string, base: string, branch: string | undefined): string | undefined {
+  const current = git(worktree, ['branch', '--show-current']).out;
+  if (branch && current === branch) return undefined;
+  const owner = current ? ws.tasks.find((t) => t.branch === current) : undefined;
+  const why = owner?.status === BLOCKED_STATUS ? 'blocked on questions' : `saved before switching to ${branch ?? base}`;
+  const saved = saveWork(worktree, why);
+  switchWorktree(repo, worktree, base, branch);
+  return saved;
 }
 
-/** The latest run record of a task (optionally by one agent), newest first by run id. */
-async function lastRun(dir: string, task: string, agent?: string): Promise<RunRecord | undefined> {
+/** Run records, newest first. Records from before the flow name the idea `task`. */
+async function runRecords(dir: string): Promise<RunRecord[]> {
   const runs = path.join(dir, 'runs');
   const files = (await fs.readdir(runs).catch(() => [] as string[])).filter((f) => f.endsWith('.json')).sort().reverse();
+  const out: RunRecord[] = [];
   for (const f of files) {
     try {
-      const r = JSON.parse(await fs.readFile(path.join(runs, f), 'utf8')) as RunRecord;
-      if (r.task === task && (!agent || r.agent === agent)) return r;
+      const r = JSON.parse(await fs.readFile(path.join(runs, f), 'utf8'));
+      out.push({ ...r, idea: r.idea ?? r.task });
     } catch {
       // ignore unreadable records
     }
   }
-  return undefined;
+  return out;
 }
 
-/** The session id of the agent's latest run on this task, for `resume`. */
-async function lastSession(dir: string, task: string, agent: string): Promise<string | undefined> {
-  const runs = path.join(dir, 'runs');
-  const files = (await fs.readdir(runs).catch(() => [] as string[])).filter((f) => f.endsWith('.json')).sort().reverse();
-  for (const f of files) {
-    try {
-      const r = JSON.parse(await fs.readFile(path.join(runs, f), 'utf8')) as RunRecord;
-      if (r.task === task && r.agent === agent && r.sessionId) return r.sessionId;
-    } catch {
-      // ignore unreadable records
-    }
-  }
-  return undefined;
+/** The latest run on an idea (optionally by one agent). */
+async function lastRun(dir: string, idea: string, agent?: string): Promise<RunRecord | undefined> {
+  return (await runRecords(dir)).find((r) => r.idea === idea && (!agent || r.agent === agent));
+}
+
+/** The session id of the agent's latest run on this idea that has one, to resume or reopen it. */
+async function lastSession(dir: string, idea: string, agent: string): Promise<string | undefined> {
+  return (await runRecords(dir)).find((r) => r.idea === idea && r.agent === agent && r.sessionId)?.sessionId;
 }
 
 /**
@@ -361,7 +423,7 @@ function pushAndOpenPr(repo: string, worktree: string, branch: string, task: Tas
   }
   const existing = gh(['pr', 'view', branch, '--json', 'url', '-q', '.url']);
   if (existing.status === 0 && existing.stdout.trim()) return existing.stdout.trim();
-  const body = `${summary}\n\nTask: \`${path.relative(repo, task.file).split(path.sep).join('/')}\` (\`${task.id}\`). Opened by \`mdpm agent run\`.`;
+  const body = `${summary}\n\nIdea: \`${path.relative(repo, task.file).split(path.sep).join('/')}\` (\`${task.id}\`). Opened by \`mdpm agent run\`.`;
   const pr = gh(['pr', 'create', '--head', branch, '--title', task.title, '--body', body]);
   if (pr.status !== 0) {
     log(`Pushed ${branch}, but "gh pr create" failed (${(pr.stderr || pr.stdout).trim()}). Open the pull request by hand.`);
@@ -370,15 +432,15 @@ function pushAndOpenPr(repo: string, worktree: string, branch: string, task: Tas
   return pr.stdout.trim().split(/\s+/).find((s) => s.startsWith('http'));
 }
 
-function describeSkips(ws: Workspace, agent: string): string {
-  const { skipped } = agentQueue(ws, agent);
-  if (!skipped.length) {
-    return `No tasks for ${agent}. Assign one with "mdpm set <task> owner=${agent}", or set "agent: {unassigned: true}" in a project's .proj to let ${agent} pick unassigned tasks.`;
-  }
-  return `No task ${agent} can work on right now:\n${skipped.map((s) => `  • ${s.task.id}: ${s.reason}`).join('\n')}`;
+
+/** What the person is told when there is nothing for the agent to do. */
+function describeIdle(ws: Workspace): string {
+  const { skipped } = flowQueue(ws);
+  if (!skipped.length) return 'Nothing to do: there are no ideas to plan and no approved plans. Write one with "mdpm idea <title>".';
+  return `Nothing the agent can do right now; it waits on you:\n${skipped.map((s) => `  • ${s.task.id}: ${s.reason}`).join('\n')}`;
 }
 
-/** Runs the agent on up to `maxTasks` tasks, one after another. */
+/** Plans or executes ideas: one run, or with `untilIdle` one after another until nothing is left. */
 export async function runAgents(opts: RunOptions): Promise<RunSummary> {
   const log = opts.log ?? ((m: string) => console.log(m));
   let ws = await loadWorkspace(opts.root);
@@ -389,10 +451,12 @@ export async function runAgents(opts: RunOptions): Promise<RunSummary> {
     throw new RunnerError(`No agent "${agentName}". Known agents: ${Object.keys(defs.agents).join(', ')}. Define it under "agents:" in the root .proj.`);
   }
   const repo = gitRoot(ws.root);
-  if (!repo) throw new RunnerError(`${ws.root} is not in a git repository. "mdpm agent run" puts each task on its own branch, so it needs one: run "git init" and make a first commit.`);
+  if (!repo) throw new RunnerError(`${ws.root} is not in a git repository. "mdpm agent run" builds each idea on its own branch, so it needs one: run "git init" and make a first commit.`);
   if (!git(repo, ['rev-parse', '--verify', '--quiet', 'HEAD']).ok) throw new RunnerError('The repository has no commits yet, so there is nothing to branch from. Make a first commit, then try again.');
 
   const dir = await stateDir(repo);
+  const running = await readActive(dir);
+  if (running.length && !opts.dryRun) throw new RunnerError(busyMessage(running[0]));
   const limitFile = path.join(dir, 'limit.json');
   let limit: { agent?: string; until?: string } = {};
   try {
@@ -404,187 +468,220 @@ export async function runAgents(opts: RunOptions): Promise<RunSummary> {
     return { records: [], stopped: `${agentName} hit its usage limit; it resets at ${new Date(limit.until).toLocaleString()}. Try again then, or delete ${limitFile} to try now.` };
   }
 
-  const bin = opts.cli ? await writeShims(dir, opts.cli) : undefined;
-  const maxTasks = opts.task ? 1 : Math.max(1, opts.maxTasks ?? 1);
-  const tried = new Set<string>();
-  const records: RunRecord[] = [];
-  const busy = async () => new Map((await readActive(dir)).map((r) => [r.task, r]));
-
-  for (let n = 0; n < maxTasks; n++) {
-    if (n > 0) ws = await loadWorkspace(ws.root);
-    let pick: AgentPick | undefined;
-    if (opts.task) {
-      const task = findTask(ws, opts.task);
-      if (!task) throw new RunnerError(`No task with id or path "${opts.task}". Run "mdpm list" to see task ids.`);
-      const running = (await busy()).get(task.id);
-      if (running) throw new RunnerError(busyMessage(running, task.id));
-      const mode = modeFor(task);
-      if (!mode) throw new RunnerError(`"${task.id}" is "${task.status}"; agents only work on backlog, todo and in-progress tasks.${task.status === 'blocked' ? ' Answer its questions and move it back to todo first.' : ''}`);
-      if (!task.home.agent.modes.includes(mode)) throw new RunnerError(`"${task.id}" needs "${mode}" mode, which project "${task.home.name}" doesn't allow (agent.modes in its .proj).`);
-      pick = { task, mode, assigned: task.owner === agentName, readiness: readiness(task.body) };
-    } else {
-      // Tasks another runner is working on are skipped, so two runners never start the same task.
-      pick = agentQueue(ws, agentName, { exclude: new Set([...tried, ...(await busy()).keys()]) }).picks[0];
-      if (!pick) return { records, stopped: n === 0 ? describeSkips(ws, agentName) : `No more tasks for ${agentName}.` };
-    }
-    const { task, mode } = pick;
-    tried.add(task.id);
-
-    const id = runId();
-    const branch = `agent/${slugify(task.id) || 'task'}`;
-    const worktree = path.join(dir, 'worktrees', slugify(task.id) || 'task');
-    const settings = task.home.agent;
-    const sessionId = mode === 'resume' && def.resume ? await lastSession(dir, task.id, agentName) : undefined;
-    const prompt = buildPrompt({ agent: agentName, mode, taskId: task.id, taskFile: task.file, taskText: await fs.readFile(task.file, 'utf8'), root: ws.root, worktree, branch });
-    const promptFile = path.join(dir, 'runs', `${id}.prompt.md`);
-    const values = {
-      prompt,
-      promptFile,
-      taskFile: task.file,
-      taskId: task.id,
-      worktree,
-      root: ws.root,
-      maxTurns: String(opts.maxTurns ?? settings.maxTurns),
-      allowedTools: settings.allowedTools,
-      sessionId: sessionId ?? '',
-    };
-    const args = expandArgs([...def.command, ...(sessionId ? def.resume ?? [] : [])], values);
-
-    log(`▶ ${task.id} (${mode}) with ${agentName} on ${branch}`);
-    if (opts.dryRun) {
-      const shown = args.map((a) => (a === prompt ? '<prompt>' : /\s/.test(a) ? JSON.stringify(a) : a)).join(' ');
-      log(`  worktree: ${worktree}\n  command:  ${shown}${def.stdin ? ' < <prompt>' : ''}\n\n${prompt}`);
-      continue;
-    }
-
-    const claim = planClaim(task, agentName, id, { force: !!opts.task });
-    const errors = previewTaskChange(ws, task, claim.changes).filter((i) => i.level === 'error');
-    if (errors.length) throw new RunnerError(`Claiming "${task.id}" would make it invalid, so it was not run:\n${errors.map((i) => `  • ${i.message}`).join('\n')}`);
-    await writeBack(task.file, claim);
-
-    const started = new Date();
-    let result: AgentResult;
-    const live = await markActive(dir, { task: task.id, agent: agentName, mode, run: id });
-    try {
-      ensureWorktree(repo, worktree, branch);
-      await fs.writeFile(promptFile, prompt);
-      const env: NodeJS.ProcessEnv = { ...process.env, MDPM_AGENT: agentName, MDPM_TASK: task.id, MDPM_ROOT: ws.root, MDPM_RUN: id };
-      delete env.ELECTRON_RUN_AS_NODE; // set when launched from VS Code; the shims set it again for mdpm only
-      if (bin) {
-        const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
-        env[key] = `${bin}${path.delimiter}${env[key] ?? ''}`;
-      }
-      result = await runProcess(args[0], args.slice(1), {
-        cwd: worktree,
-        env,
-        stdin: def.stdin ? prompt : undefined,
-        echo: opts.echo ?? true,
-        logFile: path.join(dir, 'runs', `${id}.log`),
-        format: def.output === 'claude-stream' ? formatStreamLine : undefined,
-      });
-    } catch (e) {
-      await writeBack(task.file, { changes: {}, log: `run ${id} failed to start: ${(e as Error).message}`, by: 'mdpm' });
-      throw e;
-    } finally {
-      live.stop();
-    }
-    const ended = new Date();
-
-    const parsed = def.output === 'claude-json' || def.output === 'claude-stream' ? parseClaudeJson(result.stdout) : {};
-    const streamed = def.output === 'claude-stream' ? streamLimit(result.stdout) : { limited: false };
-    const texts = detectLimit(`${parsed.result ?? ''}\n${result.stderr}${def.output === 'text' ? `\n${result.stdout}` : ''}`, ended);
-    const lim = streamed.limited ? { ...texts, limited: true, resetsAt: streamed.resetsAt ?? texts.resetsAt, text: streamed.resetsAt?.toLocaleString() ?? texts.text } : texts;
-    ws = await loadWorkspace(ws.root);
-    const after = findTask(ws, task.file) ?? task;
-    const record: RunRecord = {
-      id,
-      agent: agentName,
-      task: task.id,
-      mode,
-      started: started.toISOString(),
-      ended: ended.toISOString(),
-      durationMs: ended.getTime() - started.getTime(),
-      exitCode: result.exitCode,
-      status: after.status,
-      branch,
-      worktree,
-      sessionId: parsed.sessionId,
-      costUsd: parsed.costUsd,
-      outcome: '',
-    };
-
-    const note = async (text: string) => writeBack(after.file, { changes: {}, log: text, by: 'mdpm' });
-    const ahead = Number(git(repo, ['rev-list', '--count', `HEAD..${branch}`]).out) || 0;
-
-    if (lim.limited) {
-      record.limited = true;
-      record.resetsAt = lim.resetsAt?.toISOString() ?? lim.text;
-      record.outcome = 'usage limit';
-      await note(`run ${id} stopped: ${agentName} hit its usage limit${lim.text ? ` (resets ${lim.text})` : ''}. The task stays ${after.status} and resumes on the next run.`);
-      if (lim.resetsAt) await fs.writeFile(limitFile, JSON.stringify({ agent: agentName, until: lim.resetsAt.toISOString(), run: id }, null, 2));
-    } else if (mode === 'refine' && !lastEntryIsClaim(after, agentName) && after.status !== BLOCKED_STATUS && after.home.statuses.includes(BLOCKED_STATUS)) {
-      // A refined task always comes back to the person, who checks it before an agent implements it.
-      await writeBack(after.file, {
-        changes: applyStatusDefaults(after, { status: BLOCKED_STATUS }),
-        questions: [REVIEW_REFINEMENT],
-        log: `run ${id}: refinement done; blocked so you can review it`,
-        by: 'mdpm',
-      });
-      if (!ahead && removeWorktree(repo, worktree)) {
-        git(repo, ['branch', '-d', branch]);
-        record.worktree = undefined;
-      }
-      record.outcome = 'refined';
-    } else if (after.status === 'review') {
-      const summary = agentLog(after.body).filter((e) => e.by === agentName).at(-1)?.text.replace(/^handed off for review:\s*/i, '') ?? `Work on ${task.title}`;
-      const changes: Record<string, unknown> = {};
-      if (!after.meta.branch && ahead) changes.branch = branch;
-      if (ahead) {
-        const pr = pushAndOpenPr(repo, worktree, branch, after, summary, log);
-        if (pr && pr !== after.meta.pr) {
-          changes.pr = pr;
-          record.pr = pr;
-        }
-      }
-      const removed = removeWorktree(repo, worktree);
-      if (!removed) log(`Kept ${worktree}: it has uncommitted changes. Commit or discard them, then run "git worktree remove ${worktree}".`);
-      else record.worktree = undefined;
-      if (!ahead) git(repo, ['branch', '-d', branch]);
-      const text = ahead ? (record.pr ? `opened ${record.pr}` : `work is on branch ${branch}`) : 'handed off with no commits on its branch';
-      await writeBack(after.file, { changes, log: `run ${id}: ${text}${removed ? '' : '; worktree kept because it has uncommitted changes'}`, by: 'mdpm' });
-      record.outcome = 'handed off';
-    } else if (mode === 'refine' ? lastEntryIsClaim(after, agentName) : after.status === 'in-progress') {
-      const why = parsed.maxTurns ? `reached the turn limit (${values.maxTurns})` : `exited (code ${result.exitCode ?? 'none'}) without handing off, blocking or logging progress`;
-      const tail = (result.stderr || '').trim().split(/\r?\n/).slice(-3).join(' ').slice(0, 300);
-      await note(`run ${id}: ${agentName} ${why}${tail && !parsed.maxTurns ? `: ${tail}` : ''}. Left ${after.status} so the next run resumes it.`);
-      record.outcome = parsed.maxTurns ? 'max turns' : 'no handoff';
-    } else {
-      record.outcome = after.status;
-      if (mode === 'refine' && !ahead && removeWorktree(repo, worktree)) {
-        git(repo, ['branch', '-d', branch]);
-        record.worktree = undefined;
-      }
-    }
-
-    record.status = (findTask(await loadWorkspace(ws.root), task.file) ?? after).status;
-    await fs.writeFile(path.join(dir, 'runs', `${id}.json`), JSON.stringify(record, null, 2));
-    records.push(record);
-    log(`■ ${task.id}: ${record.outcome} (status ${record.status}, ${Math.round(record.durationMs / 1000)}s${record.costUsd !== undefined ? `, $${record.costUsd.toFixed(2)}` : ''}${record.pr ? `, ${record.pr}` : ''})`);
-    if (record.limited) return { records, stopped: `${agentName} hit its usage limit${lim.text ? `; it resets ${lim.text}` : ''}.` };
+  const old = path.join(dir, 'worktrees');
+  if (existsSync(old) && (await fs.readdir(old)).length) {
+    log(`Note: ${old} holds worktrees from the task-based runner; runs now use ${path.join(dir, AGENT_WORKTREE)}. Once nothing in them is needed, remove each with "git worktree remove <path>" (see "git worktree list").`);
   }
-  return { records, stopped: opts.dryRun ? 'Dry run: nothing was changed.' : `Reached the limit of ${maxTasks} task${maxTasks > 1 ? 's' : ''}.` };
+  const bin = opts.cli && !opts.dryRun ? await writeShims(dir, opts.cli) : undefined;
+  const runs = new Map<string, number>();
+  const records: RunRecord[] = [];
+
+  for (let n = 0; ; n++) {
+    if (n > 0) ws = await loadWorkspace(ws.root);
+    let pick: FlowPick | undefined;
+    if (opts.idea) {
+      const task = findTask(ws, opts.idea);
+      if (!task) throw new RunnerError(`No idea with id or path "${opts.idea}". Run "mdpm list" to see idea ids.`);
+      const how = modeFor(ws, task);
+      if ('reason' in how) throw new RunnerError(`The agent can't work on "${task.id}" now: ${how.reason}`);
+      pick = { task, mode: how.mode, resume: how.resume, plan: planCheck(task.body) };
+    } else {
+      const exclude = new Set([...runs].filter(([, k]) => k >= MAX_RUNS_PER_IDEA).map(([id]) => id));
+      pick = flowQueue(ws, { exclude }).picks[0];
+      if (!pick) return { records, stopped: n === 0 ? describeIdle(ws) : `Nothing left to do. ${describeIdle(ws).replace(/^Nothing[^:]*: ?/, '')}`.trim() };
+    }
+    runs.set(pick.task.id, (runs.get(pick.task.id) ?? 0) + 1);
+
+    const record = await runOne(ws, pick, { opts, def, agentName, repo, dir, bin, log });
+    if (!record) return { records, stopped: 'Dry run: nothing was changed.' };
+    records.push(record);
+    if (record.limited) return { records, stopped: `${agentName} hit its usage limit${record.resetsAt ? `; it resets ${new Date(record.resetsAt).toLocaleString()}` : ''}.` };
+    if (!opts.untilIdle || opts.idea) return { records, stopped: describeAfter(record) };
+    if (record.outcome === 'no handoff' || record.outcome === 'no plan') {
+      return { records, stopped: `Stopped: the run on "${record.idea}" ended without writing anything back. Read its log (mdpm show ${record.idea}) before running again.` };
+    }
+  }
+}
+
+/** One line on what a single run left behind. */
+function describeAfter(r: RunRecord): string {
+  const next: Record<string, string> = {
+    planned: `"${r.idea}" has a plan waiting for your approval (mdpm show ${r.idea}, then mdpm approve ${r.idea}).`,
+    'handed off': `"${r.idea}" is ready for your review${r.pr ? ` (${r.pr})` : ` on ${r.branch}`}.`,
+    blocked: `"${r.idea}" is blocked on a question for you (mdpm show ${r.idea}).`,
+    'max turns': `"${r.idea}" is still executing; the next run resumes it.`,
+  };
+  return next[r.outcome] ?? `Done: "${r.idea}" is ${r.status}.`;
+}
+
+interface RunContext {
+  opts: RunOptions;
+  def: AgentDefinition;
+  agentName: string;
+  repo: string;
+  dir: string;
+  bin?: string;
+  log: (m: string) => void;
+}
+
+/** Runs the agent once on `pick` and records what happened. Undefined for a dry run. */
+async function runOne(ws: Workspace, pick: FlowPick, c: RunContext): Promise<RunRecord | undefined> {
+  const { task, mode, resume } = pick;
+  const { opts, def, agentName, repo, dir, log } = c;
+  const id = runId();
+  const base = defaultBranch(repo);
+  const branch = mode === 'execute' ? task.branch ?? ideaBranch(task) : undefined;
+  const worktree = path.join(dir, AGENT_WORKTREE);
+  const settings = task.home.agent;
+  const sessionId = resume && def.resume ? await lastSession(dir, task.id, agentName) : undefined;
+  const prompt = buildPrompt({ agent: agentName, mode, resume, taskId: task.id, taskFile: task.file, taskText: await fs.readFile(task.file, 'utf8'), root: ws.root, worktree, branch: branch ?? base });
+  const promptFile = path.join(dir, 'runs', `${id}.prompt.md`);
+  const values = {
+    prompt,
+    promptFile,
+    taskFile: task.file,
+    taskId: task.id,
+    worktree,
+    root: ws.root,
+    maxTurns: String(opts.maxTurns ?? settings.maxTurns),
+    allowedTools: settings.allowedTools,
+    sessionId: sessionId ?? '',
+  };
+  const args = expandArgs([...def.command, ...(sessionId ? def.resume ?? [] : [])], values);
+
+  log(`▶ ${task.id}: ${mode === 'plan' ? `planning, reading ${base}` : `${resume ? 'resuming' : 'executing'} on ${branch}`} with ${agentName}`);
+  if (opts.dryRun) {
+    const shown = args.map((a) => (a === prompt ? '<prompt>' : /\s/.test(a) ? JSON.stringify(a) : a)).join(' ');
+    log(`  worktree: ${worktree}\n  command:  ${shown}${def.stdin ? ' < <prompt>' : ''}\n\n${prompt}`);
+    return undefined;
+  }
+
+  const start: WriteBack = mode === 'execute' ? planStart(ws, task, agentName, id) : { changes: {}, log: `started planning (run ${id})`, by: agentName };
+  const errors = previewTaskChange(ws, task, start.changes).filter((i) => i.level === 'error');
+  if (errors.length) throw new RunnerError(`Starting "${task.id}" would make it invalid, so it was not run:\n${errors.map((i) => `  • ${i.message}`).join('\n')}`);
+
+  const started = new Date();
+  let result: AgentResult;
+  const live = await markActive(dir, { task: task.id, agent: agentName, mode, run: id });
+  try {
+    ensureAgentWorktree(repo, worktree, base);
+    const saved = prepareWorktree(ws, repo, worktree, base, branch);
+    if (saved) log(`  ${saved}`);
+    await writeBack(task.file, start);
+    await fs.writeFile(promptFile, prompt);
+    const env: NodeJS.ProcessEnv = { ...process.env, MDPM_AGENT: agentName, MDPM_TASK: task.id, MDPM_ROOT: ws.root, MDPM_RUN: id };
+    delete env.ELECTRON_RUN_AS_NODE; // set when launched from VS Code; the shims set it again for mdpm only
+    if (c.bin) {
+      const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+      env[key] = `${c.bin}${path.delimiter}${env[key] ?? ''}`;
+    }
+    result = await runProcess(args[0], args.slice(1), {
+      cwd: worktree,
+      env,
+      stdin: def.stdin ? prompt : undefined,
+      echo: opts.echo ?? true,
+      logFile: path.join(dir, 'runs', `${id}.log`),
+      format: def.output === 'claude-stream' ? formatStreamLine : undefined,
+    });
+  } catch (e) {
+    if (e instanceof RunnerError) throw e;
+    await writeBack(task.file, { changes: {}, log: `run ${id} failed to start: ${(e as Error).message}`, by: 'mdpm' });
+    throw e;
+  } finally {
+    live.stop();
+  }
+  const ended = new Date();
+
+  const parsed = def.output === 'claude-json' || def.output === 'claude-stream' ? parseClaudeJson(result.stdout) : {};
+  const streamed = def.output === 'claude-stream' ? streamLimit(result.stdout) : { limited: false };
+  const texts = detectLimit(`${parsed.result ?? ''}\n${result.stderr}${def.output === 'text' ? `\n${result.stdout}` : ''}`, ended);
+  const lim = streamed.limited ? { ...texts, limited: true, resetsAt: streamed.resetsAt ?? texts.resetsAt, text: streamed.resetsAt?.toLocaleString() ?? texts.text } : texts;
+  ws = await loadWorkspace(ws.root);
+  const after = findTask(ws, task.file) ?? task;
+  const record: RunRecord = {
+    id,
+    agent: agentName,
+    idea: task.id,
+    mode,
+    resume: resume || undefined,
+    started: started.toISOString(),
+    ended: ended.toISOString(),
+    durationMs: ended.getTime() - started.getTime(),
+    exitCode: result.exitCode,
+    status: after.status,
+    branch: branch ?? base,
+    sessionId: parsed.sessionId,
+    costUsd: parsed.costUsd,
+    outcome: '',
+  };
+  const note = (text: string) => writeBack(after.file, { changes: {}, log: text, by: 'mdpm' });
+
+  if (lim.limited) {
+    record.limited = true;
+    record.resetsAt = lim.resetsAt?.toISOString() ?? lim.text;
+    record.outcome = 'usage limit';
+    await note(`run ${id} stopped: ${agentName} hit its usage limit${lim.text ? ` (resets ${lim.text})` : ''}. It stays ${after.status} and ${mode === 'plan' ? 'is planned again' : 'resumes'} on a later run.`);
+    if (lim.resetsAt) await fs.writeFile(path.join(dir, 'limit.json'), JSON.stringify({ agent: agentName, until: lim.resetsAt.toISOString(), run: id }, null, 2));
+  } else if (mode === 'plan') {
+    const stashed = saveWork(worktree, `left by the plan run ${id}`);
+    if (stashed) await note(`run ${id}: the plan run changed files, which it shouldn't; ${stashed}`);
+    if (after.status === 'idea' && planCheck(after.body).complete) {
+      // The agent wrote a plan but didn't propose it; the person reviews it either way.
+      await writeBack(after.file, { ...planPropose(after, 'mdpm'), log: `run ${id}: the plan was written but not proposed; it now waits for your approval` });
+      record.outcome = 'planned';
+    } else if (after.status === 'idea') {
+      await writeBack(after.file, { ...planBlock(after, 'mdpm', [NO_PLAN_QUESTION]), log: `run ${id}: ${agentName} ${exitWhy(parsed, result, values.maxTurns)} without writing a plan` });
+      record.outcome = 'no plan';
+    } else {
+      record.outcome = after.status === 'plan' ? 'planned' : after.status === BLOCKED_STATUS ? 'blocked' : after.status;
+    }
+  } else if (after.status === 'review') {
+    const committed = saveWork(worktree, 'uncommitted changes left at handoff');
+    const ahead = Number(git(repo, ['rev-list', '--count', `${base}..${branch}`]).out) || 0;
+    const summary = logEntries(after.body).filter((e) => e.by === agentName).at(-1)?.text.replace(/^handed off for review:\s*/i, '') ?? `Work on ${task.title}`;
+    const changes: Record<string, unknown> = {};
+    if (ahead) {
+      const pr = pushAndOpenPr(repo, worktree, branch!, after, summary, log);
+      if (pr && pr !== after.pr) {
+        changes.pr = pr;
+        record.pr = pr;
+      }
+    }
+    // Free the branch, so the person can check it out to review it.
+    git(worktree, ['checkout', '--quiet', '--detach']);
+    const text = ahead ? (record.pr ? `opened ${record.pr}` : `work is on branch ${branch}`) : 'handed off with no commits on its branch';
+    await writeBack(after.file, { changes, log: `run ${id}: ${text}${committed ? `; ${committed}` : ''}`, by: 'mdpm' });
+    record.outcome = 'handed off';
+  } else if (after.status === 'executing') {
+    await note(`run ${id}: ${agentName} ${exitWhy(parsed, result, values.maxTurns)}. Left executing, so the next run resumes it.`);
+    record.outcome = parsed.maxTurns ? 'max turns' : 'no handoff';
+  } else {
+    record.outcome = after.status === BLOCKED_STATUS ? 'blocked' : after.status;
+  }
+
+  record.status = (findTask(await loadWorkspace(ws.root), task.file) ?? after).status;
+  await fs.writeFile(path.join(dir, 'runs', `${id}.json`), JSON.stringify(record, null, 2));
+  log(`■ ${task.id}: ${record.outcome} (status ${record.status}, ${Math.round(record.durationMs / 1000)}s${record.costUsd !== undefined ? `, $${record.costUsd.toFixed(2)}` : ''}${record.pr ? `, ${record.pr}` : ''})`);
+  return record;
+}
+
+/** Why an agent stopped without finishing, in words. */
+function exitWhy(parsed: { maxTurns?: boolean }, result: AgentResult, maxTurns: string): string {
+  if (parsed.maxTurns) return `reached the turn limit (${maxTurns})`;
+  const tail = (result.stderr || '').trim().split(/\r?\n/).slice(-3).join(' ').slice(0, 300);
+  return `exited (code ${result.exitCode ?? 'none'}) without finishing${tail ? `: ${tail}` : ''}`;
 }
 
 export interface ContinueOptions {
   /** Workspace root (the main checkout). */
   root: string;
-  /** Task id or path. */
+  /** Idea id or path. */
   task: string;
-  /** Agent to talk to; default: the agent of the task's latest run, else its owner if that is an agent, else the default agent. */
+  /** Agent to talk to; default: the agent of the idea's latest run, else the default agent. */
   agent?: string;
   /** Start a new conversation even if an earlier one can be reopened. */
   fresh?: boolean;
-  /** Plan only: don't create the worktree or the `mdpm` shims. */
+  /** Plan only: don't touch the worktree or write the `mdpm` shims. */
   dryRun?: boolean;
   cli?: { node: string; script: string };
 }
@@ -593,42 +690,44 @@ export interface ContinuePlan {
   agent: string;
   task: Task;
   worktree: string;
+  /** The idea's branch, or the default branch (detached) for an idea that hasn't been executed yet. */
   branch: string;
   /** Program and arguments to run, with no placeholders left. */
   command: string[];
   env: NodeJS.ProcessEnv;
-  /** True when the agent's earlier conversation is reopened; false for a new one that starts from the task. */
+  /** True when the agent's last run on the idea is reopened; false for a new conversation that starts from the idea. */
   reopened: boolean;
   /** The runner state folder (`.mdpm`), where the session is marked as active. */
   stateDir: string;
-  /** The worktree was missing (removed after handoff) and has been recreated on the task's branch. */
+  /** The agent worktree didn't exist yet and was created. */
   recreated: boolean;
 }
 
 /**
- * Prepares an interactive session with an agent on a task: finds the agent, makes sure the task's
- * worktree exists (recreating it on branch `agent/<id>` after a handoff removed it), and builds the
- * command that reopens the agent's last conversation there, or starts a new one that begins with
- * the task. Task state and the person's directions stay theirs: `MDPM_AGENT` is not set.
+ * Prepares an interactive session with an agent on an idea: puts the agent worktree on the idea's
+ * branch (saving whatever was in progress there first), and builds the command that reopens the
+ * agent's last run on the idea, or starts a new conversation that begins with the idea. Idea state
+ * and the person's directions stay theirs: `MDPM_AGENT` is not set.
  */
 export async function planContinue(opts: ContinueOptions): Promise<ContinuePlan> {
   const ws = await loadWorkspace(opts.root);
   const task = findTask(ws, opts.task);
-  if (!task) throw new RunnerError(`No task with id or path "${opts.task}". Run "mdpm list" to see task ids.`);
+  if (!task) throw new RunnerError(`No idea with id or path "${opts.task}". Run "mdpm list" to see idea ids.`);
   const defs = agentDefinitions(ws);
   const repo = gitRoot(ws.root);
   if (!repo) throw new RunnerError(`${ws.root} is not in a git repository, so there is no branch or worktree to continue in. Run "git init" and make a first commit.`);
   const dir = await stateDir(repo);
 
-  const running = (await readActive(dir)).find((r) => r.task === task.id);
-  if (running) throw new RunnerError(busyMessage(running, task.id));
+  const running = await readActive(dir);
+  if (running.length) throw new RunnerError(busyMessage(running[0]));
   const previous = await lastRun(dir, task.id, opts.agent);
-  const agentName = opts.agent ?? previous?.agent ?? (task.owner && defs.agents[task.owner] ? task.owner : defs.default);
+  const agentName = opts.agent ?? previous?.agent ?? defs.default;
   const def = defs.agents[agentName];
   if (!def) throw new RunnerError(`No agent "${agentName}". Known agents: ${Object.keys(defs.agents).join(', ')}. Define it under "agents:" in the root .proj.`);
 
-  // A task's agent worked in this worktree before, so its conversation can be reopened there.
-  const reopened = !!previous && !opts.fresh && !!def.continueInteractive;
+  // Every idea shares the agent worktree, so the conversation is found by the session id of the idea's last run.
+  const sessionId = !opts.fresh && def.continueInteractive ? await lastSession(dir, task.id, agentName) : undefined;
+  const reopened = !!sessionId;
   const template = reopened ? def.continueInteractive : def.interactive;
   if (!template) {
     throw new RunnerError(
@@ -636,13 +735,16 @@ export async function planContinue(opts: ContinueOptions): Promise<ContinuePlan>
     );
   }
 
-  const slug = slugify(task.id) || 'task';
-  const branch = `agent/${slug}`;
-  const worktree = path.join(dir, 'worktrees', slug);
+  const base = defaultBranch(repo);
+  const branch = task.branch;
+  const worktree = path.join(dir, AGENT_WORKTREE);
   const recreated = !existsSync(path.join(worktree, '.git'));
-  if (!opts.dryRun) ensureWorktree(repo, worktree, branch);
+  if (!opts.dryRun) {
+    ensureAgentWorktree(repo, worktree, base);
+    prepareWorktree(ws, repo, worktree, base, branch);
+  }
 
-  const prompt = buildContinuePrompt({ agent: agentName, taskId: task.id, taskFile: task.file, taskText: await fs.readFile(task.file, 'utf8'), root: ws.root, worktree, branch });
+  const prompt = buildContinuePrompt({ agent: agentName, taskId: task.id, taskFile: task.file, taskText: await fs.readFile(task.file, 'utf8'), root: ws.root, worktree, branch: branch ?? `${base} (detached)` });
   const command = expandArgs(template, {
     prompt,
     taskFile: task.file,
@@ -651,6 +753,7 @@ export async function planContinue(opts: ContinueOptions): Promise<ContinuePlan>
     root: ws.root,
     maxTurns: String(task.home.agent.maxTurns),
     allowedTools: task.home.agent.allowedTools,
+    sessionId: sessionId ?? '',
   });
 
   const env: NodeJS.ProcessEnv = { ...process.env, MDPM_TASK: task.id, MDPM_ROOT: ws.root };
@@ -660,7 +763,7 @@ export async function planContinue(opts: ContinueOptions): Promise<ContinuePlan>
     const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
     env[key] = `${await writeShims(dir, opts.cli)}${path.delimiter}${env[key] ?? ''}`;
   }
-  return { agent: agentName, task, worktree, branch, command, env, reopened, stateDir: dir, recreated };
+  return { agent: agentName, task, worktree, branch: branch ?? base, command, env, reopened, stateDir: dir, recreated };
 }
 
 /** Runs a planned interactive session attached to this terminal and resolves with the agent's exit code. */

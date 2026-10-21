@@ -7,17 +7,12 @@ priority: 2
 tags:
   - agents
   - cli
-depends_on:
-  - agent-task-commands
-  - agent-init-skill-and-agents-md
-owner: claude
-start: 2026-10-19
-end: 2026-10-19
+completed: 2026-10-19
 ---
 
 # Agent runner
 
-## Description
+## Idea
 
 `mdpm agent run`: pick, claim, run an agent CLI in an isolated worktree, record the result. Design: [docs/agent-workflow.md](../../docs/agent-workflow.md) (Running agents).
 
@@ -31,7 +26,7 @@ end: 2026-10-19
 - [x] Run records in `.mdpm/runs/` (git-ignored) with agent, task, duration, exit code, session id and cost if reported; `resume` mode reuses the session id where the agent supports it
 - [ ] Works on Windows, macOS and Linux (no shell strings)
 
-## Agent log
+## Log
 
 - 2026-10-19 10:26 claude — claimed (run session-2026-10-19)
 - 2026-10-19 10:27 claude — handed off for review: mdpm agent run in packages/core/src/runner.ts: presets claude/codex/cursor plus validated custom agents (argument lists, placeholders, stdin), worktree per task on agent/<id> under .mdpm/worktrees, task state in MDPM_ROOT, mdpm shims on the agent's PATH, push + gh pr create on handoff with pr: recorded, worktree removed after handoff, --task/--agent/--max-tasks/--max-turns/--dry-run, run records in .mdpm/runs (self-ignoring), Claude session resume, usage-limit stop with reset gate, no shell (Windows .cmd via quoted cmd.exe). Tested end to end with fake agents (handoff, limit, no-handoff, dry run). Left unticked: a real usage-limit message is still unverified (detection is pattern-based; see docs/agent-workflow.md) and Windows is untested beyond unit tests of the quoting. Also not yet exercised: a real claude run on a task and the push/PR path against a real remote.

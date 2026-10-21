@@ -3,7 +3,6 @@
   --muted: var(--vscode-descriptionForeground);
   --surface: var(--vscode-sideBar-background, var(--vscode-editor-background));
   --card: var(--vscode-editorWidget-background, var(--vscode-editor-background));
-  --weekend: rgba(128, 128, 128, 0.07);
 }
 
 * { box-sizing: border-box; }
@@ -66,7 +65,7 @@ button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 .seg button:last-child { border-radius: 0 2px 2px 0; }
 .seg button.active { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
 
-/* Kanban */
+/* Board */
 .board {
   display: flex;
   gap: 12px;
@@ -129,23 +128,7 @@ button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 .card-title { font-weight: 600; margin-bottom: 6px; line-height: 1.3; }
 .card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.85em; color: var(--muted); }
 .card-meta .id { font-family: var(--vscode-editor-font-family); opacity: 0.8; }
-.card-meta .owner {
-  margin-left: auto;
-  background: var(--vscode-badge-background);
-  color: var(--vscode-badge-foreground);
-  border-radius: 10px;
-  padding: 0 7px;
-}
 .badge.prio { border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
-.due.overdue { color: var(--vscode-errorForeground); font-weight: 600; }
-.tags { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
-.tag {
-  font-size: 0.8em;
-  padding: 0 6px;
-  border-radius: 3px;
-  background: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.15));
-  color: var(--vscode-textLink-foreground);
-}
 .card-project { margin-top: 6px; font-size: 0.8em; color: var(--muted); }
 .card { position: relative; }
 .card-actions { position: absolute; top: 4px; right: 4px; display: none; gap: 1px; }
@@ -153,17 +136,14 @@ button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 .card-actions .act { padding: 1px 7px; font-size: 0.85em; color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
 .card-actions .act:hover { background: var(--vscode-button-hoverBackground); }
 .card-actions .act.more { padding: 1px 5px; }
-.card-meta .owner.agent { background: color-mix(in srgb, var(--vscode-charts-purple) 30%, var(--vscode-badge-background)); }
 
 /* Blocked: yellow, so it is seen at a glance */
-.column.blocked { border-color: var(--vscode-charts-yellow); background: color-mix(in srgb, var(--vscode-charts-yellow) 8%, var(--surface)); }
-.column.blocked header { color: var(--vscode-charts-yellow); }
 .card.blocked { background: color-mix(in srgb, var(--vscode-charts-yellow) 12%, var(--card)); border-color: color-mix(in srgb, var(--vscode-charts-yellow) 55%, var(--border)); }
 
-/* AI flow board */
+/* Flow board */
 .flow .stage-idea { --accent: var(--vscode-descriptionForeground); }
-.flow .stage-planned { --accent: var(--vscode-charts-blue); }
-.flow .stage-building { --accent: var(--vscode-charts-purple); }
+.flow .stage-plan { --accent: var(--vscode-charts-blue); }
+.flow .stage-executing { --accent: var(--vscode-charts-purple); }
 .flow .stage-review { --accent: var(--vscode-charts-orange); }
 .flow .stage-done { --accent: var(--vscode-charts-green); }
 .flow .column { border-top: 3px solid var(--accent); }
@@ -173,7 +153,15 @@ button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 .flow .hint { padding: 0 12px 8px; font-size: 0.85em; color: var(--muted); }
 .flow .lane-empty { padding: 12px 4px; font-size: 0.85em; color: var(--muted); font-style: italic; }
 .flow .card.blocked { --accent: var(--vscode-charts-yellow); }
-.flow .flag { font-size: 0.8em; font-weight: 600; color: var(--vscode-charts-yellow); margin-bottom: 4px; }
+.flow .flag { font-size: 0.8em; font-weight: 600; margin-bottom: 4px; padding-right: 70px; }
+.flow .flag.ask { color: var(--vscode-charts-yellow); }
+.flow .flag.you { color: var(--vscode-charts-orange); }
+.flow .flag.queued { color: var(--muted); font-weight: normal; }
+.flow .card.needs:not(.blocked) { border-color: color-mix(in srgb, var(--vscode-charts-orange) 45%, var(--border)); border-left-color: var(--accent); }
+.slot { padding: 1px 8px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted); }
+.slot.busy { color: var(--vscode-foreground); border-color: var(--vscode-charts-purple); }
+.slot.blocked { color: var(--vscode-charts-yellow); border-color: var(--vscode-charts-yellow); }
+button:disabled { opacity: 0.5; cursor: default; }
 .criteria { display: inline-flex; align-items: center; gap: 4px; }
 .criteria .bar { width: 40px; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
 .criteria .bar span { display: block; height: 100%; background: var(--accent); }
@@ -186,121 +174,6 @@ button:hover { background: var(--vscode-button-secondaryHoverBackground); }
   border-radius: 10px;
   padding: 1px 8px;
 }
-
-/* Waterfall */
-.wf-scroll { height: 100%; overflow: auto; }
-.wf-inner { position: relative; min-height: 100%; }
-.wf-header { position: sticky; top: 0; z-index: 4; display: flex; background: var(--vscode-editor-background); border-bottom: 1px solid var(--border); }
-.wf-corner {
-  position: sticky;
-  left: 0;
-  z-index: 5;
-  width: var(--label);
-  flex: none;
-  padding: 0 10px;
-  display: flex;
-  align-items: flex-end;
-  padding-bottom: 6px;
-  color: var(--muted);
-  background: var(--vscode-editor-background);
-  border-right: 1px solid var(--border);
-}
-.wf-scale { position: relative; height: 44px; flex: none; }
-.months, .ticks { position: absolute; left: 0; right: 0; height: 22px; }
-.months { top: 0; }
-.ticks { top: 22px; }
-.month, .tick {
-  position: absolute;
-  top: 0;
-  height: 22px;
-  line-height: 22px;
-  padding-left: 4px;
-  white-space: nowrap;
-  overflow: hidden;
-  border-left: 1px solid var(--border);
-  font-size: 0.85em;
-}
-.month { font-weight: 600; }
-.tick { color: var(--muted); }
-.tick.now { color: var(--vscode-charts-red); font-weight: 600; }
-
-.wf-body { position: relative; }
-.wf-row { display: flex; height: var(--row); }
-.wf-label {
-  position: sticky;
-  left: 0;
-  z-index: 3;
-  width: var(--label);
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding-right: 8px;
-  white-space: nowrap;
-  overflow: hidden;
-  background: var(--vscode-editor-background);
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid rgba(128, 128, 128, 0.08);
-}
-.wf-label .title { overflow: hidden; text-overflow: ellipsis; }
-.wf-label .title.done { text-decoration: line-through; color: var(--muted); }
-.wf-label[data-key] { cursor: pointer; }
-.wf-label[data-key]:hover .title { text-decoration: underline; }
-.wf-label.selected {
-  color: var(--vscode-list-activeSelectionForeground, inherit);
-  background: var(--vscode-list-activeSelectionBackground);
-  outline: 1px solid var(--vscode-contrastActiveBorder, var(--vscode-focusBorder));
-  outline-offset: -1px;
-}
-.wf-label.selected .muted, .wf-label.selected .title.done { color: inherit; opacity: 0.85; }
-.wf-row.group .wf-label { font-weight: 600; background: var(--surface); }
-.wf-row.group .wf-track { background: var(--surface); }
-.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.wf-track { position: relative; flex: none; border-bottom: 1px solid rgba(128, 128, 128, 0.08); }
-.wf-track.unscheduled { cursor: copy; }
-.wf-track.unscheduled:hover { background-color: var(--vscode-list-hoverBackground); }
-
-.bar {
-  position: absolute;
-  top: 5px;
-  height: calc(var(--row) - 10px);
-  min-width: 4px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--accent) 35%, transparent);
-  border: 1px solid var(--accent);
-  display: flex;
-  align-items: center;
-  overflow: hidden;
-  cursor: grab;
-  font-size: 0.85em;
-  user-select: none;
-  z-index: 2;
-}
-.bar span { flex: 1; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
-.bar.done { opacity: 0.6; }
-.bar.late { box-shadow: inset 0 0 0 1px var(--vscode-errorForeground); }
-.bar.selected { outline: 2px solid var(--vscode-contrastActiveBorder, var(--vscode-focusBorder)); outline-offset: 1px; }
-.bar.dragging { cursor: grabbing; overflow: visible; }
-.bar.dragging::after {
-  content: attr(data-tip);
-  position: absolute;
-  top: -22px;
-  left: 0;
-  padding: 1px 6px;
-  white-space: nowrap;
-  border-radius: 3px;
-  background: var(--vscode-editorHoverWidget-background);
-  border: 1px solid var(--vscode-editorHoverWidget-border);
-}
-.h { width: 6px; align-self: stretch; cursor: ew-resize; flex: none; }
-.h:hover { background: var(--accent); }
-
-.wf-overlay { position: absolute; top: 0; pointer-events: none; z-index: 2; overflow: visible; }
-.wf-overlay .today { stroke: var(--vscode-charts-red); stroke-width: 1.5; stroke-dasharray: 4 3; }
-.wf-overlay .dep { fill: none; stroke: var(--muted); stroke-width: 1.2; }
-.wf-overlay .dep.bad { stroke: var(--vscode-errorForeground); }
-.wf-overlay .arrowhead { fill: var(--muted); }
-.wf-overlay .arrowhead.bad { fill: var(--vscode-errorForeground); }
 
 /* An agent is working on this task right now */
 .running {
@@ -321,7 +194,6 @@ button:hover { background: var(--vscode-button-secondaryHoverBackground); }
   animation: mdpm-pulse 1.4s ease-in-out infinite;
 }
 .card.working { border-color: var(--vscode-charts-purple); animation: mdpm-glow 2.4s ease-in-out infinite; }
-.queued { padding: 0 6px; border: 1px dashed var(--border); border-radius: 10px; color: var(--muted); }
 @keyframes mdpm-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.7); } }
 @keyframes mdpm-glow { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-charts-purple) 45%, transparent); } }
 @media (prefers-reduced-motion: reduce) {
