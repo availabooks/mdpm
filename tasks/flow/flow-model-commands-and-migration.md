@@ -1,6 +1,6 @@
 ---
 title: Flow model, commands and migration
-status: review
+status: done
 author: Elijah Allen
 created: 2026-10-20
 priority: 1
@@ -10,6 +10,7 @@ tags:
   - cli
 approved: 2026-10-20
 branch: flow/ai-flow-redesign
+completed: 2026-10-20
 ---
 
 # Flow model, commands and migration

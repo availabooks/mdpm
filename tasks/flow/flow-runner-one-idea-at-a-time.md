@@ -1,6 +1,6 @@
 ---
 title: "Flow runner: one idea at a time"
-status: review
+status: done
 author: Elijah Allen
 created: 2026-10-20
 priority: 2
@@ -9,6 +9,7 @@ tags:
   - runner
 approved: 2026-10-20
 branch: flow/ai-flow-redesign
+completed: 2026-10-20
 ---
 
 # Flow runner: one idea at a time

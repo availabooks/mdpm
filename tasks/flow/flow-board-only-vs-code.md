@@ -1,6 +1,6 @@
 ---
 title: Flow board only VS Code
-status: review
+status: done
 author: Elijah Allen
 created: 2026-10-20
 priority: 3
@@ -9,6 +9,7 @@ tags:
   - vscode
 approved: 2026-10-20
 branch: flow/ai-flow-redesign
+completed: 2026-10-20
 ---
 
 # Flow board only VS Code
